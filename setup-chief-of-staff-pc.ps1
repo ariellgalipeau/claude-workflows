@@ -332,18 +332,93 @@ if (Step-Done 6) {
     }
 } else {
     Write-Host ""
-    Write-Host "  Starting Claude Code. Type: 'Check my latest emails'" -ForegroundColor White
-    Write-Host "  Your browser will open. Sign in and click Allow." -ForegroundColor White
+    Write-Host "  We need your Google credentials JSON file."
+    Write-Host "  (This is the file you downloaded from Google Cloud Console. It starts with 'client_secret_')"
     Write-Host ""
-    Write-Host "  IMPORTANT: You may see a warning that says 'Google hasn't verified this app'." -ForegroundColor Yellow
-    Write-Host "  Click 'Advanced' at the bottom left, then click 'Go to [app name] (unsafe)'." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  Then type /exit to continue."
-    Write-Host ""
-    Read-Host "  Press Enter to start Claude Code"
-    claude
-    Write-Host ""
-    Write-Host "  Gmail authenticated" -ForegroundColor Green
+
+    $gmailCredDir = Join-Path $env:USERPROFILE ".gmail-mcp"
+    $gmailCredFile = Join-Path $gmailCredDir "gcp-oauth.keys.json"
+    $credPath = $null
+
+    if (Test-Path $gmailCredFile) {
+        Write-Host "  Found existing Gmail credentials file." -ForegroundColor Green
+        $useExisting = Read-Host "  Use existing credentials? (y/n)"
+        if ($useExisting -eq "y" -or $useExisting -eq "Y") {
+            $credPath = "SKIP"
+        }
+    }
+
+    # Auto-search Downloads and Desktop if we need a file
+    if (-not $credPath) {
+        $foundFile = $null
+        foreach ($searchDir in @(
+            (Join-Path $env:USERPROFILE "Downloads"),
+            (Join-Path $env:USERPROFILE "Desktop")
+        )) {
+            if (Test-Path $searchDir) {
+                $match = Get-ChildItem -Path $searchDir -Filter "client_secret_*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($match) {
+                    $foundFile = $match.FullName
+                    break
+                }
+            }
+        }
+
+        if ($foundFile) {
+            Write-Host "  Found credentials file:" -ForegroundColor Green
+            Write-Host "    $(Split-Path $foundFile -Leaf)"
+            Write-Host ""
+            $useFound = Read-Host "  Use this file? (y/n)"
+            if ($useFound -eq "y" -or $useFound -eq "Y") {
+                $credPath = $foundFile
+            }
+        }
+
+        # If still no file, ask for path
+        if (-not $credPath) {
+            Write-Host ""
+            Write-Host "  Paste the full path to your client_secret JSON file:"
+            Write-Host "  (Right-click the file in File Explorer, click 'Copy as path', then right-click here to paste)"
+            $credPath = Read-Host "  "
+            $credPath = $credPath.Trim('"').Trim("'").Trim()
+        }
+    }
+
+    # Copy the file into place
+    if ($credPath -ne "SKIP") {
+        if ([string]::IsNullOrWhiteSpace($credPath)) {
+            Write-Host "  WARNING: No credentials file provided. Gmail auth will need to be set up manually." -ForegroundColor Yellow
+        } else {
+            if (-not (Test-Path $gmailCredDir)) {
+                New-Item -Path $gmailCredDir -ItemType Directory -Force | Out-Null
+            }
+            try {
+                Copy-Item -Path $credPath -Destination $gmailCredFile -Force
+                Write-Host "  Credentials file saved" -ForegroundColor Green
+            } catch {
+                Write-Host "  Could not copy credentials file. Check the path and try again." -ForegroundColor Red
+                Step-Failed 6
+            }
+        }
+    }
+
+    if (Test-Path $gmailCredFile) {
+        Write-Host ""
+        Write-Host "  Starting Claude Code. Type: 'Check my latest emails'" -ForegroundColor White
+        Write-Host "  Your browser will open. Sign in and click Allow." -ForegroundColor White
+        Write-Host ""
+        Write-Host "  IMPORTANT: You may see a warning that says 'Google hasn't verified this app'." -ForegroundColor Yellow
+        Write-Host "  Click 'Advanced' at the bottom left, then click 'Go to [app name] (unsafe)'." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Then type /exit to continue."
+        Write-Host ""
+        Read-Host "  Press Enter to start Claude Code"
+        claude
+        Write-Host ""
+        Write-Host "  Gmail authenticated" -ForegroundColor Green
+    } else {
+        Write-Host "  Skipping Gmail auth (no credentials file). You can set this up later." -ForegroundColor Yellow
+    }
     Mark-Done 6
 }
 Write-Host ""

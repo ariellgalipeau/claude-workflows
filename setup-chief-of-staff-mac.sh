@@ -351,19 +351,46 @@ else
         echo "  Found existing Gmail credentials file."
         read -p "  Use existing credentials? (y/n): " USE_EXISTING
         if [ "$USE_EXISTING" != "y" ] && [ "$USE_EXISTING" != "Y" ]; then
-            read -p "  Drag and drop the client_secret JSON file here (or type the full path): " CRED_PATH
-            CRED_PATH=$(echo "$CRED_PATH" | sed "s/^'//" | sed "s/'$//" | xargs)
-            mkdir -p ~/.gmail-mcp
-            if cp "$CRED_PATH" ~/.gmail-mcp/gcp-oauth.keys.json; then
-                echo "  ✓ Credentials file saved"
-            else
-                echo "  ✗ Could not copy credentials file. Check the path and try again."
-                step_failed 7
-            fi
+            CRED_PATH=""
+        else
+            CRED_PATH="SKIP"
         fi
     else
-        read -p "  Drag and drop the client_secret JSON file here (or type the full path): " CRED_PATH
-        CRED_PATH=$(echo "$CRED_PATH" | sed "s/^'//" | sed "s/'$//" | xargs)
+        CRED_PATH=""
+    fi
+
+    # Auto-search Downloads and Desktop if we need a file
+    if [ -z "$CRED_PATH" ]; then
+        FOUND_FILE=""
+        for SEARCH_DIR in "$HOME/Downloads" "$HOME/Desktop"; do
+            MATCH=$(find "$SEARCH_DIR" -maxdepth 1 -name "client_secret_*.json" -type f 2>/dev/null | head -1)
+            if [ -n "$MATCH" ]; then
+                FOUND_FILE="$MATCH"
+                break
+            fi
+        done
+
+        if [ -n "$FOUND_FILE" ]; then
+            echo "  Found credentials file:"
+            echo "    $(basename "$FOUND_FILE")"
+            echo ""
+            read -p "  Use this file? (y/n): " USE_FOUND
+            if [ "$USE_FOUND" = "y" ] || [ "$USE_FOUND" = "Y" ]; then
+                CRED_PATH="$FOUND_FILE"
+            fi
+        fi
+
+        # If still no file, ask for drag-and-drop
+        if [ -z "$CRED_PATH" ]; then
+            echo ""
+            echo "  Drag and drop the client_secret JSON file here (or type the full path):"
+            read -p "  " CRED_PATH
+            CRED_PATH=$(echo "$CRED_PATH" | sed "s/^'//" | sed "s/'$//" | xargs)
+        fi
+    fi
+
+    # Copy the file into place
+    if [ "$CRED_PATH" != "SKIP" ]; then
         if [ -z "$CRED_PATH" ]; then
             echo "  WARNING: No credentials file provided. Gmail auth will need to be set up manually."
             echo "  You can run this later: npx @gongrzhe/server-gmail-autoauth-mcp auth"
