@@ -95,7 +95,7 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 # =========================================================================
 # Step 1: Check Claude Code
 # =========================================================================
-Write-Host "[1/7] Checking Claude Code..." -ForegroundColor Yellow
+Write-Host "[1/6] Checking Claude Code..." -ForegroundColor Yellow
 if ((Step-Done 1) -and (Get-Command claude -ErrorAction SilentlyContinue)) {
     Write-Host "  Claude Code is installed (skipped)" -ForegroundColor Green
 } elseif (Get-Command claude -ErrorAction SilentlyContinue) {
@@ -120,7 +120,7 @@ Write-Host ""
 # =========================================================================
 # Step 2: Download google-mcp-server
 # =========================================================================
-Write-Host "[2/7] Setting up Google MCP server..." -ForegroundColor Yellow
+Write-Host "[2/6] Setting up Google MCP server..." -ForegroundColor Yellow
 
 # Determine install location based on permissions
 $toolsDirAdmin = "C:\Tools"
@@ -211,7 +211,7 @@ Write-Host ""
 # =========================================================================
 # Step 3: Save credentials to environment
 # =========================================================================
-Write-Host "[3/7] Saving your Google credentials..." -ForegroundColor Yellow
+Write-Host "[3/6] Saving your Google credentials..." -ForegroundColor Yellow
 if (Step-Done 3) {
     Write-Host "  Credentials already saved (skipped)" -ForegroundColor Green
 } else {
@@ -229,9 +229,9 @@ Mark-Done "credentials_saved"
 Write-Host ""
 
 # =========================================================================
-# Step 4: Authenticate Google (Calendar + Drive)
+# Step 4: Authenticate Google (Calendar, Drive, Gmail, Slides)
 # =========================================================================
-Write-Host "[4/7] Authenticating with Google for Calendar + Drive..." -ForegroundColor Yellow
+Write-Host "[4/6] Authenticating with Google (Calendar, Drive, Gmail, Slides)..." -ForegroundColor Yellow
 if (Step-Done 4) {
     Write-Host "  Google auth already completed (skipped)" -ForegroundColor Green
     $reauth = Read-Host "  Re-run authentication anyway? (y/n)"
@@ -248,7 +248,7 @@ if (Step-Done 4) {
         Read-Host "  Press Enter to open the browser"
         try { & $serverPath } catch { }
         Write-Host ""
-        Write-Host "  Google Calendar + Drive re-authenticated" -ForegroundColor Green
+        Write-Host "  Google services re-authenticated (Calendar, Drive, Gmail, Slides)" -ForegroundColor Green
     }
 } else {
     Write-Host ""
@@ -263,15 +263,15 @@ if (Step-Done 4) {
     Read-Host "  Press Enter to open the browser"
     try { & $serverPath } catch { }
     Write-Host ""
-    Write-Host "  Google Calendar + Drive authenticated" -ForegroundColor Green
+    Write-Host "  Google services authenticated (Calendar, Drive, Gmail, Slides)" -ForegroundColor Green
     Mark-Done 4
 }
 Write-Host ""
 
 # =========================================================================
-# Step 5: Add MCP servers to Claude Code
+# Step 5: Add MCP server to Claude Code
 # =========================================================================
-Write-Host "[5/7] Adding Google connections to Claude Code..." -ForegroundColor Yellow
+Write-Host "[5/6] Adding Google connection to Claude Code..." -ForegroundColor Yellow
 if (Step-Done 5) {
     Write-Host "  MCP connections already added (skipped)" -ForegroundColor Green
 } else {
@@ -286,21 +286,12 @@ if (Step-Done 5) {
     try { claude mcp remove google 2>$null } catch {}
     try { claude mcp remove gmail 2>$null } catch {}
 
-    # Add Calendar + Drive
+    # Add Google (covers Calendar, Drive, Gmail, Slides with one auth)
     try {
         claude mcp add --scope user google $serverPath
-        Write-Host "  Calendar + Drive connection added" -ForegroundColor Green
+        Write-Host "  Google connection added (Calendar, Drive, Gmail, Slides)" -ForegroundColor Green
     } catch {
         Write-Host "  Failed to add Google MCP: $_" -ForegroundColor Red
-        Step-Failed 5
-    }
-
-    # Add Gmail
-    try {
-        claude mcp add --scope user gmail -- npx -y @gongrzhe/server-gmail-autoauth-mcp
-        Write-Host "  Gmail connection added" -ForegroundColor Green
-    } catch {
-        Write-Host "  Failed to add Gmail MCP: $_" -ForegroundColor Red
         Step-Failed 5
     }
 
@@ -309,125 +300,10 @@ if (Step-Done 5) {
 Write-Host ""
 
 # =========================================================================
-# Step 6: Authenticate Gmail
+# Step 6: Create folder structure
 # =========================================================================
-Write-Host "[6/7] Setting up Gmail authentication..." -ForegroundColor Yellow
+Write-Host "[6/6] Creating your Chief of Staff folder structure..." -ForegroundColor Yellow
 if (Step-Done 6) {
-    Write-Host "  Gmail auth already completed (skipped)" -ForegroundColor Green
-    $reauthGmail = Read-Host "  Re-run Gmail authentication anyway? (y/n)"
-    if ($reauthGmail -eq "y" -or $reauthGmail -eq "Y") {
-        Write-Host ""
-        Write-Host "  Starting Claude Code. Type: 'Check my latest emails'" -ForegroundColor White
-        Write-Host "  Your browser will open. Sign in and click Allow." -ForegroundColor White
-        Write-Host ""
-        Write-Host "  IMPORTANT: You may see a warning that says 'Google hasn't verified this app'." -ForegroundColor Yellow
-        Write-Host "  Click 'Advanced' at the bottom left, then click 'Go to [app name] (unsafe)'." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  Then type /exit to continue."
-        Write-Host ""
-        Read-Host "  Press Enter to start Claude Code"
-        claude
-        Write-Host ""
-        Write-Host "  Gmail re-authenticated" -ForegroundColor Green
-    }
-} else {
-    Write-Host ""
-    Write-Host "  We need your Google credentials JSON file."
-    Write-Host "  (This is the file you downloaded from Google Cloud Console. It starts with 'client_secret_')"
-    Write-Host ""
-
-    $gmailCredDir = Join-Path $env:USERPROFILE ".gmail-mcp"
-    $gmailCredFile = Join-Path $gmailCredDir "gcp-oauth.keys.json"
-    $credPath = $null
-
-    if (Test-Path $gmailCredFile) {
-        Write-Host "  Found existing Gmail credentials file." -ForegroundColor Green
-        $useExisting = Read-Host "  Use existing credentials? (y/n)"
-        if ($useExisting -eq "y" -or $useExisting -eq "Y") {
-            $credPath = "SKIP"
-        }
-    }
-
-    # Auto-search Downloads and Desktop if we need a file
-    if (-not $credPath) {
-        $foundFile = $null
-        foreach ($searchDir in @(
-            (Join-Path $env:USERPROFILE "Downloads"),
-            (Join-Path $env:USERPROFILE "Desktop")
-        )) {
-            if (Test-Path $searchDir) {
-                $match = Get-ChildItem -Path $searchDir -Filter "client_secret_*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($match) {
-                    $foundFile = $match.FullName
-                    break
-                }
-            }
-        }
-
-        if ($foundFile) {
-            Write-Host "  Found credentials file:" -ForegroundColor Green
-            Write-Host "    $(Split-Path $foundFile -Leaf)"
-            Write-Host ""
-            $useFound = Read-Host "  Use this file? (y/n)"
-            if ($useFound -eq "y" -or $useFound -eq "Y") {
-                $credPath = $foundFile
-            }
-        }
-
-        # If still no file, ask for path
-        if (-not $credPath) {
-            Write-Host ""
-            Write-Host "  Paste the full path to your client_secret JSON file:"
-            Write-Host "  (Right-click the file in File Explorer, click 'Copy as path', then right-click here to paste)"
-            $credPath = Read-Host "  "
-            $credPath = $credPath.Trim('"').Trim("'").Trim()
-        }
-    }
-
-    # Copy the file into place
-    if ($credPath -ne "SKIP") {
-        if ([string]::IsNullOrWhiteSpace($credPath)) {
-            Write-Host "  WARNING: No credentials file provided. Gmail auth will need to be set up manually." -ForegroundColor Yellow
-        } else {
-            if (-not (Test-Path $gmailCredDir)) {
-                New-Item -Path $gmailCredDir -ItemType Directory -Force | Out-Null
-            }
-            try {
-                Copy-Item -Path $credPath -Destination $gmailCredFile -Force
-                Write-Host "  Credentials file saved" -ForegroundColor Green
-            } catch {
-                Write-Host "  Could not copy credentials file. Check the path and try again." -ForegroundColor Red
-                Step-Failed 6
-            }
-        }
-    }
-
-    if (Test-Path $gmailCredFile) {
-        Write-Host ""
-        Write-Host "  Starting Claude Code. Type: 'Check my latest emails'" -ForegroundColor White
-        Write-Host "  Your browser will open. Sign in and click Allow." -ForegroundColor White
-        Write-Host ""
-        Write-Host "  IMPORTANT: You may see a warning that says 'Google hasn't verified this app'." -ForegroundColor Yellow
-        Write-Host "  Click 'Advanced' at the bottom left, then click 'Go to [app name] (unsafe)'." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  Then type /exit to continue."
-        Write-Host ""
-        Read-Host "  Press Enter to start Claude Code"
-        claude
-        Write-Host ""
-        Write-Host "  Gmail authenticated" -ForegroundColor Green
-    } else {
-        Write-Host "  Skipping Gmail auth (no credentials file). You can set this up later." -ForegroundColor Yellow
-    }
-    Mark-Done 6
-}
-Write-Host ""
-
-# =========================================================================
-# Step 7: Create folder structure
-# =========================================================================
-Write-Host "[7/7] Creating your Chief of Staff folder structure..." -ForegroundColor Yellow
-if (Step-Done 7) {
     Write-Host "  Folder structure already created (skipped)" -ForegroundColor Green
 } else {
     $chiefPath = Join-Path $env:USERPROFILE "chief"
@@ -464,7 +340,57 @@ if (Step-Done 7) {
     }
 
     Write-Host "  Folder structure created" -ForegroundColor Green
-    Mark-Done 7
+    Mark-Done 6
+}
+Write-Host ""
+
+# =========================================================================
+# Post-install sanity check
+# =========================================================================
+Write-Host "[check] Verifying your setup is working..." -ForegroundColor Yellow
+
+# Check 1: google-mcp-server binary responds with expected startup output
+$sanityPassed = $true
+try {
+    $job = Start-Job -ScriptBlock {
+        param($path)
+        & $path 2>&1
+    } -ArgumentList $serverPath
+    Start-Sleep -Seconds 3
+    Stop-Job $job -ErrorAction SilentlyContinue
+    $serverOutput = Receive-Job $job 2>&1 | Out-String
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
+
+    if ($serverOutput -match "registered successfully") {
+        Write-Host "  google-mcp-server is responsive" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: google-mcp-server did not produce expected startup output." -ForegroundColor Yellow
+        $sanityPassed = $false
+    }
+} catch {
+    Write-Host "  WARNING: Could not verify google-mcp-server: $_" -ForegroundColor Yellow
+    $sanityPassed = $false
+}
+
+# Check 2: google MCP is registered in Claude Code config
+try {
+    $mcpList = (claude mcp list 2>$null) | Out-String
+    if ($mcpList -match "google") {
+        Write-Host "  Google MCP is registered in Claude Code" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: Google MCP not found in Claude Code config." -ForegroundColor Yellow
+        $sanityPassed = $false
+    }
+} catch {
+    Write-Host "  Could not check Claude Code config — restart PowerShell if needed." -ForegroundColor Yellow
+    $sanityPassed = $false
+}
+
+if (-not $sanityPassed) {
+    Write-Host ""
+    Write-Host "  Setup finished, but one or more checks did not pass." -ForegroundColor Yellow
+    Write-Host "  This doesn't necessarily mean something is broken — raise your hand" -ForegroundColor Yellow
+    Write-Host "  at the event and we'll verify it's working end-to-end." -ForegroundColor Yellow
 }
 Write-Host ""
 

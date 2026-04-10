@@ -88,7 +88,7 @@ fi
 # =========================================================================
 # Step 1: Claude Code
 # =========================================================================
-echo "[1/8] Checking Claude Code..."
+echo "[1/7] Checking Claude Code..."
 if step_done 1 && command -v claude &> /dev/null; then
     echo "  ✓ Claude Code is installed (skipped)"
 elif command -v claude &> /dev/null; then
@@ -112,7 +112,7 @@ echo ""
 # =========================================================================
 # Step 2: Install Homebrew (or skip if not admin)
 # =========================================================================
-echo "[2/8] Checking Homebrew..."
+echo "[2/7] Checking Homebrew..."
 if step_done 2; then
     echo "  ✓ Homebrew step already completed (skipped)"
 elif command -v brew &> /dev/null; then
@@ -145,7 +145,7 @@ echo ""
 # =========================================================================
 # Step 3: Install google-mcp-server
 # =========================================================================
-echo "[3/8] Installing Google MCP server..."
+echo "[3/7] Installing Google MCP server..."
 
 # Determine install method and path
 GOOGLE_MCP_PATH=""
@@ -210,7 +210,7 @@ echo ""
 # =========================================================================
 # Step 4: Save credentials
 # =========================================================================
-echo "[4/8] Saving your Google credentials..."
+echo "[4/7] Saving your Google credentials..."
 if step_done "credentials_saved"; then
     # Still update in case user provided new credentials this run
     if [ -f ~/.zshrc ]; then
@@ -233,9 +233,9 @@ mark_done "credentials_saved"
 echo ""
 
 # =========================================================================
-# Step 5: Authenticate Google (Calendar + Drive)
+# Step 5: Authenticate Google (Calendar, Drive, Gmail, Slides)
 # =========================================================================
-echo "[5/8] Authenticating with Google for Calendar + Drive..."
+echo "[5/7] Authenticating with Google (Calendar, Drive, Gmail, Slides)..."
 if step_done 5; then
     echo "  ✓ Google auth already completed (skipped)"
     read -p "  Re-run authentication anyway? (y/n): " REAUTH
@@ -286,7 +286,7 @@ echo ""
 # =========================================================================
 # Step 6: Add MCP servers to Claude Code
 # =========================================================================
-echo "[6/8] Adding Google connections to Claude Code..."
+echo "[6/7] Adding Google connection to Claude Code..."
 if step_done 6; then
     echo "  ✓ MCP connections already added (skipped)"
 else
@@ -307,125 +307,22 @@ else
     claude mcp remove google 2>/dev/null || true
     claude mcp remove gmail 2>/dev/null || true
 
-    # Add Calendar + Drive
+    # Add Google (covers Calendar, Drive, Gmail, Slides with one auth)
     if [ "$GOOGLE_MCP_PATH" = "npx" ]; then
         claude mcp add --scope user google -- npx -y @anthropic-ai/google-mcp-server
     else
         claude mcp add --scope user google "$GOOGLE_MCP_PATH"
     fi
-    echo "  ✓ Calendar + Drive connection added"
-
-    # Add Gmail
-    claude mcp add --scope user gmail -- npx -y @gongrzhe/server-gmail-autoauth-mcp
-    echo "  ✓ Gmail connection added"
+    echo "  ✓ Google connection added (Calendar, Drive, Gmail, Slides)"
     mark_done 6
 fi
 echo ""
 
 # =========================================================================
-# Step 7: Gmail authentication
+# Step 7: Folder structure
 # =========================================================================
-echo "[7/8] Setting up Gmail authentication..."
+echo "[7/7] Creating your Chief of Staff folder structure..."
 if step_done 7; then
-    echo "  ✓ Gmail auth already completed (skipped)"
-    read -p "  Re-run Gmail authentication anyway? (y/n): " REAUTH_GMAIL
-    if [ "$REAUTH_GMAIL" = "y" ] || [ "$REAUTH_GMAIL" = "Y" ]; then
-        echo ""
-        echo "  Your browser will open again. Sign in and click Allow for Gmail access."
-        echo ""
-        echo "  ⚠ IMPORTANT: You may see a warning that says 'Google hasn't verified this app'."
-        echo "  Click 'Advanced' at the bottom left, then click 'Go to [app name] (unsafe)'."
-        echo ""
-        read -p "  Press Enter to open the browser..." _dummy
-        npx @gongrzhe/server-gmail-autoauth-mcp auth || true
-        echo ""
-        echo "  ✓ Gmail re-authenticated"
-    fi
-else
-    echo ""
-    echo "  We need your Google credentials JSON file."
-    echo "  (This is the file you downloaded from Google Cloud Console. It starts with 'client_secret_')"
-    echo ""
-
-    if [ -f ~/.gmail-mcp/gcp-oauth.keys.json ]; then
-        echo "  Found existing Gmail credentials file."
-        read -p "  Use existing credentials? (y/n): " USE_EXISTING
-        if [ "$USE_EXISTING" != "y" ] && [ "$USE_EXISTING" != "Y" ]; then
-            CRED_PATH=""
-        else
-            CRED_PATH="SKIP"
-        fi
-    else
-        CRED_PATH=""
-    fi
-
-    # Auto-search Downloads and Desktop if we need a file
-    if [ -z "$CRED_PATH" ]; then
-        FOUND_FILE=""
-        for SEARCH_DIR in "$HOME/Downloads" "$HOME/Desktop"; do
-            MATCH=$(find "$SEARCH_DIR" -maxdepth 1 -name "client_secret_*.json" -type f 2>/dev/null | head -1)
-            if [ -n "$MATCH" ]; then
-                FOUND_FILE="$MATCH"
-                break
-            fi
-        done
-
-        if [ -n "$FOUND_FILE" ]; then
-            echo "  Found credentials file:"
-            echo "    $(basename "$FOUND_FILE")"
-            echo ""
-            read -p "  Use this file? (y/n): " USE_FOUND
-            if [ "$USE_FOUND" = "y" ] || [ "$USE_FOUND" = "Y" ]; then
-                CRED_PATH="$FOUND_FILE"
-            fi
-        fi
-
-        # If still no file, ask for drag-and-drop
-        if [ -z "$CRED_PATH" ]; then
-            echo ""
-            echo "  Drag and drop the client_secret JSON file here (or type the full path):"
-            read -p "  " CRED_PATH
-            CRED_PATH=$(echo "$CRED_PATH" | sed "s/^'//" | sed "s/'$//" | xargs)
-        fi
-    fi
-
-    # Copy the file into place
-    if [ "$CRED_PATH" != "SKIP" ]; then
-        if [ -z "$CRED_PATH" ]; then
-            echo "  WARNING: No credentials file provided. Gmail auth will need to be set up manually."
-            echo "  You can run this later: npx @gongrzhe/server-gmail-autoauth-mcp auth"
-        else
-            mkdir -p ~/.gmail-mcp
-            if cp "$CRED_PATH" ~/.gmail-mcp/gcp-oauth.keys.json; then
-                echo "  ✓ Credentials file saved"
-            else
-                echo "  ✗ Could not copy credentials file. Check the path and try again."
-                step_failed 7
-            fi
-        fi
-    fi
-
-    if [ -f ~/.gmail-mcp/gcp-oauth.keys.json ]; then
-        echo ""
-        echo "  Your browser will open again. Sign in and click Allow for Gmail access."
-        echo ""
-        echo "  ⚠ IMPORTANT: You may see a warning that says 'Google hasn't verified this app'."
-        echo "  Click 'Advanced' at the bottom left, then click 'Go to [app name] (unsafe)'."
-        echo ""
-        read -p "  Press Enter to open the browser..." _dummy
-        npx @gongrzhe/server-gmail-autoauth-mcp auth || true
-        echo ""
-        echo "  ✓ Gmail authenticated"
-    fi
-    mark_done 7
-fi
-echo ""
-
-# =========================================================================
-# Step 8: Folder structure
-# =========================================================================
-echo "[8/8] Creating your Chief of Staff folder structure..."
-if step_done 8; then
     echo "  ✓ Folder structure already created (skipped)"
 else
     mkdir -p ~/chief/about-me
@@ -442,7 +339,50 @@ else
     fi
 
     echo "  ✓ Folder structure created"
-    mark_done 8
+    mark_done 7
+fi
+echo ""
+
+# =========================================================================
+# Post-install sanity check
+# =========================================================================
+echo "[check] Verifying your setup is working..."
+SANITY_PASSED=true
+
+# Check 1: google-mcp-server binary responds with expected startup output
+SANITY_LOG=$(mktemp)
+if [ "$GOOGLE_MCP_PATH" = "npx" ]; then
+    (npx -y @anthropic-ai/google-mcp-server > "$SANITY_LOG" 2>&1) &
+else
+    ("$GOOGLE_MCP_PATH" > "$SANITY_LOG" 2>&1) &
+fi
+SANITY_PID=$!
+sleep 3
+kill "$SANITY_PID" 2>/dev/null || true
+wait "$SANITY_PID" 2>/dev/null || true
+
+if grep -q "registered successfully" "$SANITY_LOG" 2>/dev/null; then
+    echo "  ✓ google-mcp-server is responsive"
+else
+    echo "  ⚠ WARNING: google-mcp-server did not produce expected startup output."
+    SANITY_PASSED=false
+fi
+rm -f "$SANITY_LOG"
+
+# Check 2: google MCP is registered in Claude Code config
+export PATH="$HOME/.local/bin:$PATH"
+if claude mcp list 2>/dev/null | grep -q "google"; then
+    echo "  ✓ Google MCP is registered in Claude Code"
+else
+    echo "  ⚠ WARNING: Google MCP not found in Claude Code config."
+    SANITY_PASSED=false
+fi
+
+if [ "$SANITY_PASSED" = false ]; then
+    echo ""
+    echo "  Setup finished, but one or more checks did not pass."
+    echo "  This doesn't necessarily mean something is broken — raise your hand"
+    echo "  at the event and we'll verify it's working end-to-end."
 fi
 echo ""
 
