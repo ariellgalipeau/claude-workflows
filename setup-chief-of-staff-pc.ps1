@@ -95,7 +95,7 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 # =========================================================================
 # Step 1: Check Claude Code
 # =========================================================================
-Write-Host "[1/6] Checking Claude Code..." -ForegroundColor Yellow
+Write-Host "[1/7] Checking Claude Code..." -ForegroundColor Yellow
 if ((Step-Done 1) -and (Get-Command claude -ErrorAction SilentlyContinue)) {
     Write-Host "  Claude Code is installed (skipped)" -ForegroundColor Green
 } elseif (Get-Command claude -ErrorAction SilentlyContinue) {
@@ -120,7 +120,7 @@ Write-Host ""
 # =========================================================================
 # Step 2: Download google-mcp-server
 # =========================================================================
-Write-Host "[2/6] Setting up Google MCP server..." -ForegroundColor Yellow
+Write-Host "[2/7] Setting up Google MCP server..." -ForegroundColor Yellow
 
 # Determine install location based on permissions
 $toolsDirAdmin = "C:\Tools"
@@ -211,7 +211,7 @@ Write-Host ""
 # =========================================================================
 # Step 3: Save credentials to environment
 # =========================================================================
-Write-Host "[3/6] Saving your Google credentials..." -ForegroundColor Yellow
+Write-Host "[3/7] Saving your Google credentials..." -ForegroundColor Yellow
 if (Step-Done 3) {
     Write-Host "  Credentials already saved (skipped)" -ForegroundColor Green
 } else {
@@ -231,7 +231,7 @@ Write-Host ""
 # =========================================================================
 # Step 4: Authenticate Google (Calendar, Drive, Gmail, Slides)
 # =========================================================================
-Write-Host "[4/6] Authenticating with Google (Calendar, Drive, Gmail, Slides)..." -ForegroundColor Yellow
+Write-Host "[4/7] Authenticating with Google (Calendar, Drive, Slides)..." -ForegroundColor Yellow
 if (Step-Done 4) {
     Write-Host "  Google auth already completed (skipped)" -ForegroundColor Green
     $reauth = Read-Host "  Re-run authentication anyway? (y/n)"
@@ -271,7 +271,7 @@ Write-Host ""
 # =========================================================================
 # Step 5: Add MCP server to Claude Code
 # =========================================================================
-Write-Host "[5/6] Adding Google connection to Claude Code..." -ForegroundColor Yellow
+Write-Host "[5/7] Adding Google connection to Claude Code..." -ForegroundColor Yellow
 if (Step-Done 5) {
     Write-Host "  MCP connections already added (skipped)" -ForegroundColor Green
 } else {
@@ -300,10 +300,88 @@ if (Step-Done 5) {
 Write-Host ""
 
 # =========================================================================
-# Step 6: Create folder structure
+# Step 6: Gmail (send) MCP — separate server with its own auth
 # =========================================================================
-Write-Host "[6/6] Creating your Chief of Staff folder structure..." -ForegroundColor Yellow
+# The ngs google-mcp-server in Step 5 is READ-ONLY for Gmail (list + get).
+# To send email from Claude Code, we need @gongrzhe/server-gmail-autoauth-mcp.
+# It uses the same OAuth client (your client_secret_*.json) but a separate token.
+Write-Host "[6/7] Setting up Gmail send capability..." -ForegroundColor Yellow
+$gmailMcpDir = Join-Path $env:USERPROFILE ".gmail-mcp"
+$gmailKeysFile = Join-Path $gmailMcpDir "gcp-oauth.keys.json"
+$gmailCredsFile = Join-Path $gmailMcpDir "credentials.json"
+
 if (Step-Done 6) {
+    Write-Host "  Gmail MCP already set up (skipped)" -ForegroundColor Green
+} else {
+    if (-not (Test-Path $gmailMcpDir)) {
+        New-Item -Path $gmailMcpDir -ItemType Directory -Force | Out-Null
+    }
+
+    # Locate the OAuth JSON
+    if (Test-Path $gmailKeysFile) {
+        Write-Host "  Found existing OAuth keys at $gmailKeysFile" -ForegroundColor Green
+    } else {
+        $foundJson = Get-ChildItem -Path "$env:USERPROFILE\Downloads\client_secret_*.json","$env:USERPROFILE\Desktop\client_secret_*.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        if ($foundJson) {
+            Write-Host "  Found OAuth file: $($foundJson.Name)" -ForegroundColor Green
+            $useFound = Read-Host "  Use this file? (y/n)"
+            if ($useFound -eq "y" -or $useFound -eq "Y") {
+                Copy-Item $foundJson.FullName $gmailKeysFile -Force
+                Write-Host "  Copied to $gmailKeysFile" -ForegroundColor Green
+            } else {
+                Write-Host "  Right-click the JSON file in File Explorer and choose 'Copy as path',"
+                Write-Host "  then right-click in this window to paste:"
+                $manualPath = Read-Host "  Path to JSON file"
+                $manualPath = $manualPath.Trim('"').Trim("'")
+                Copy-Item $manualPath $gmailKeysFile -Force
+                Write-Host "  Copied to $gmailKeysFile" -ForegroundColor Green
+            }
+        } else {
+            Write-Host "  No client_secret_*.json found in Downloads or Desktop." -ForegroundColor Yellow
+            Write-Host "  Right-click the JSON file in File Explorer and choose 'Copy as path',"
+            Write-Host "  then right-click in this window to paste:"
+            $manualPath = Read-Host "  Path to JSON file"
+            $manualPath = $manualPath.Trim('"').Trim("'")
+            Copy-Item $manualPath $gmailKeysFile -Force
+            Write-Host "  Copied to $gmailKeysFile" -ForegroundColor Green
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  Your browser will open for Gmail authentication." -ForegroundColor White
+    Write-Host ""
+    Write-Host "  IMPORTANT: On the Google permission screen, make sure EVERY checkbox" -ForegroundColor Yellow
+    Write-Host "  is checked - especially 'Send email on your behalf'. If you skip it," -ForegroundColor Yellow
+    Write-Host "  Claude won't be able to send mail." -ForegroundColor Yellow
+    Write-Host ""
+    Read-Host "  Press Enter to open the browser"
+    try {
+        npx -y "@gongrzhe/server-gmail-autoauth-mcp" auth
+        Write-Host "  Gmail authenticated" -ForegroundColor Green
+    } catch {
+        Write-Host "  Gmail auth did not complete cleanly: $_" -ForegroundColor Red
+        Step-Failed 6
+    }
+
+    # Add the MCP to Claude Code
+    try { claude mcp remove gmail 2>$null } catch {}
+    try {
+        claude mcp add --scope user gmail -- npx -y "@gongrzhe/server-gmail-autoauth-mcp"
+        Write-Host "  Gmail MCP added to Claude Code (send + read)" -ForegroundColor Green
+        Mark-Done 6
+    } catch {
+        Write-Host "  Failed to add Gmail MCP to Claude Code: $_" -ForegroundColor Red
+        Step-Failed 6
+    }
+}
+Write-Host ""
+
+# =========================================================================
+# Step 7: Create folder structure
+# =========================================================================
+Write-Host "[7/7] Creating your Chief of Staff folder structure..." -ForegroundColor Yellow
+if (Step-Done 7) {
     Write-Host "  Folder structure already created (skipped)" -ForegroundColor Green
 } else {
     $chiefPath = Join-Path $env:USERPROFILE "chief"
@@ -340,7 +418,7 @@ if (Step-Done 6) {
     }
 
     Write-Host "  Folder structure created" -ForegroundColor Green
-    Mark-Done 6
+    Mark-Done 7
 }
 Write-Host ""
 
@@ -372,6 +450,14 @@ try {
     $sanityPassed = $false
 }
 
+# Check 4: gmail credentials.json exists (proves Gmail auth completed)
+if (Test-Path $gmailCredsFile) {
+    Write-Host "  Gmail OAuth token found at $gmailCredsFile" -ForegroundColor Green
+} else {
+    Write-Host "  WARNING: No Gmail OAuth token found. Re-run the auth step." -ForegroundColor Yellow
+    $sanityPassed = $false
+}
+
 # Check 2: google MCP is registered in Claude Code config
 try {
     $mcpList = (claude mcp list 2>$null) | Out-String
@@ -381,8 +467,16 @@ try {
         Write-Host "  WARNING: Google MCP not found in Claude Code config." -ForegroundColor Yellow
         $sanityPassed = $false
     }
+
+    # Check 3: gmail MCP is registered (needed for sending email)
+    if ($mcpList -match "gmail") {
+        Write-Host "  Gmail MCP is registered in Claude Code (send + read)" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: Gmail MCP not found - you won't be able to send email." -ForegroundColor Yellow
+        $sanityPassed = $false
+    }
 } catch {
-    Write-Host "  Could not check Claude Code config — restart PowerShell if needed." -ForegroundColor Yellow
+    Write-Host "  Could not check Claude Code config - restart PowerShell if needed." -ForegroundColor Yellow
     $sanityPassed = $false
 }
 
@@ -411,6 +505,7 @@ Write-Host ""
 Write-Host "  Try asking:"
 Write-Host '    "What''s on my calendar this week?"'
 Write-Host '    "Show me my latest unread emails"'
+Write-Host '    "Draft an email to myself saying hello"'
 Write-Host ""
 Write-Host "  If something isn't working, raise your hand — we're here to help!"
 Write-Host ""
