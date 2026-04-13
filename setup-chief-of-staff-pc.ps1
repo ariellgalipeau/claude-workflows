@@ -16,6 +16,14 @@
 #   irm https://raw.githubusercontent.com/ariellgalipeau/claude-workflows/main/setup-chief-of-staff-pc.ps1 | iex
 # ============================================================================
 
+# --- Strict error handling for native commands ---
+# Without these, try/catch silently swallows external command failures (e.g., npx, claude)
+# and the script reports success even when steps fail. PS 7.3+ supports both settings.
+$ErrorActionPreference = "Stop"
+if ($PSVersionTable.PSVersion.Major -ge 7 -and $PSVersionTable.PSVersion.Minor -ge 3) {
+    $PSNativeCommandUseErrorActionPreference = $true
+}
+
 # --- Checkpoint system ---
 $CheckpointDir = Join-Path $env:USERPROFILE ".chief-setup"
 if (-not (Test-Path $CheckpointDir)) {
@@ -313,6 +321,15 @@ $gmailCredsFile = Join-Path $gmailMcpDir "credentials.json"
 if (Step-Done 6) {
     Write-Host "  Gmail MCP already set up (skipped)" -ForegroundColor Green
 } else {
+    # Verify npx is available — Gmail MCP requires Node.js
+    if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
+        Write-Host "  ERROR: npx not found on your PATH." -ForegroundColor Red
+        Write-Host "  The Gmail MCP requires Node.js. Install it from:" -ForegroundColor Yellow
+        Write-Host "    https://nodejs.org/  (LTS version, click the Windows installer)" -ForegroundColor Yellow
+        Write-Host "  After installing, close PowerShell, reopen it, and re-run this script." -ForegroundColor Yellow
+        Step-Failed 6
+    }
+
     if (-not (Test-Path $gmailMcpDir)) {
         New-Item -Path $gmailMcpDir -ItemType Directory -Force | Out-Null
     }

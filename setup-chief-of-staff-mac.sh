@@ -328,6 +328,16 @@ echo "[7/8] Setting up Gmail send capability..."
 if step_done 7; then
     echo "  ✓ Gmail MCP already set up (skipped)"
 else
+    # Verify npx is available — Gmail MCP requires Node.js
+    if ! command -v npx &> /dev/null; then
+        echo "  ✗ ERROR: npx not found on your PATH."
+        echo "  The Gmail MCP requires Node.js. Install it via one of:"
+        echo "    brew install node           # if you have Homebrew"
+        echo "    https://nodejs.org/         # download the macOS LTS installer"
+        echo "  After installing, close Terminal, reopen it, and re-run this script."
+        step_failed 7
+    fi
+
     # Locate the OAuth JSON (auto-search Downloads, then Desktop)
     GMAIL_JSON=""
     if [ -f ~/.gmail-mcp/gcp-oauth.keys.json ]; then
