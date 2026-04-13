@@ -88,7 +88,7 @@ fi
 # =========================================================================
 # Step 1: Claude Code
 # =========================================================================
-echo "[1/7] Checking Claude Code..."
+echo "[1/8] Checking Claude Code..."
 if step_done 1 && command -v claude &> /dev/null; then
     echo "  ✓ Claude Code is installed (skipped)"
 elif command -v claude &> /dev/null; then
@@ -112,7 +112,7 @@ echo ""
 # =========================================================================
 # Step 2: Install Homebrew (or skip if not admin)
 # =========================================================================
-echo "[2/7] Checking Homebrew..."
+echo "[2/8] Checking Homebrew..."
 if step_done 2; then
     echo "  ✓ Homebrew step already completed (skipped)"
 elif command -v brew &> /dev/null; then
@@ -145,7 +145,7 @@ echo ""
 # =========================================================================
 # Step 3: Install google-mcp-server
 # =========================================================================
-echo "[3/7] Installing Google MCP server..."
+echo "[3/8] Installing Google MCP server..."
 
 # Determine install method and path
 GOOGLE_MCP_PATH=""
@@ -210,7 +210,7 @@ echo ""
 # =========================================================================
 # Step 4: Save credentials
 # =========================================================================
-echo "[4/7] Saving your Google credentials..."
+echo "[4/8] Saving your Google credentials..."
 if step_done "credentials_saved"; then
     # Still update in case user provided new credentials this run
     if [ -f ~/.zshrc ]; then
@@ -235,7 +235,7 @@ echo ""
 # =========================================================================
 # Step 5: Authenticate Google (Calendar, Drive, Gmail, Slides)
 # =========================================================================
-echo "[5/7] Authenticating with Google (Calendar, Drive, Gmail, Slides)..."
+echo "[5/8] Authenticating with Google (Calendar, Drive, Slides)..."
 if step_done 5; then
     echo "  ✓ Google auth already completed (skipped)"
     read -p "  Re-run authentication anyway? (y/n): " REAUTH
@@ -286,7 +286,7 @@ echo ""
 # =========================================================================
 # Step 6: Add MCP servers to Claude Code
 # =========================================================================
-echo "[6/7] Adding Google connection to Claude Code..."
+echo "[6/8] Adding Google connection to Claude Code..."
 if step_done 6; then
     echo "  ✓ MCP connections already added (skipped)"
 else
@@ -319,9 +319,80 @@ fi
 echo ""
 
 # =========================================================================
-# Step 7: Folder structure
+# Step 7: Gmail (send) MCP — separate server with its own auth
 # =========================================================================
-echo "[7/7] Creating your Chief of Staff folder structure..."
+# The ngs google-mcp-server in Step 6 is READ-ONLY for Gmail (list + get).
+# To send email from Claude Code, we need @gongrzhe/server-gmail-autoauth-mcp.
+# It uses the same OAuth client (your client_secret_*.json) but a separate token.
+echo "[7/8] Setting up Gmail send capability..."
+if step_done 7; then
+    echo "  ✓ Gmail MCP already set up (skipped)"
+else
+    # Locate the OAuth JSON (auto-search Downloads, then Desktop)
+    GMAIL_JSON=""
+    if [ -f ~/.gmail-mcp/gcp-oauth.keys.json ]; then
+        echo "  ✓ Found existing OAuth keys at ~/.gmail-mcp/gcp-oauth.keys.json"
+    else
+        mkdir -p ~/.gmail-mcp
+        FOUND_JSON=$(ls ~/Downloads/client_secret_*.json 2>/dev/null | head -1)
+        if [ -z "$FOUND_JSON" ]; then
+            FOUND_JSON=$(ls ~/Desktop/client_secret_*.json 2>/dev/null | head -1)
+        fi
+
+        if [ -n "$FOUND_JSON" ]; then
+            echo "  Found OAuth file: $(basename "$FOUND_JSON")"
+            read -p "  Use this file? (y/n): " USE_FOUND
+            if [ "$USE_FOUND" = "y" ] || [ "$USE_FOUND" = "Y" ]; then
+                cp "$FOUND_JSON" ~/.gmail-mcp/gcp-oauth.keys.json
+                echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
+            else
+                echo "  Drag the JSON file from Finder into this terminal window, then press Enter:"
+                read -p "  > " DRAGGED_PATH
+                DRAGGED_PATH=$(echo "$DRAGGED_PATH" | sed "s/^['\"]//;s/['\"]$//")
+                cp "$DRAGGED_PATH" ~/.gmail-mcp/gcp-oauth.keys.json
+                echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
+            fi
+        else
+            echo "  No client_secret_*.json found in Downloads or Desktop."
+            echo "  Drag the JSON file from Finder into this terminal window, then press Enter:"
+            read -p "  > " DRAGGED_PATH
+            DRAGGED_PATH=$(echo "$DRAGGED_PATH" | sed "s/^['\"]//;s/['\"]$//")
+            cp "$DRAGGED_PATH" ~/.gmail-mcp/gcp-oauth.keys.json
+            echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
+        fi
+    fi
+
+    echo ""
+    echo "  Your browser will open for Gmail authentication."
+    echo ""
+    echo "  ⚠ IMPORTANT: On the Google permission screen, make sure EVERY checkbox"
+    echo "  is checked — especially 'Send email on your behalf'. If you skip it,"
+    echo "  Claude won't be able to send mail."
+    echo ""
+    read -p "  Press Enter to open the browser..." _dummy
+    if npx -y @gongrzhe/server-gmail-autoauth-mcp auth; then
+        echo "  ✓ Gmail authenticated"
+    else
+        echo "  ⚠ Gmail auth did not complete cleanly. You can re-run this script to retry."
+        step_failed 7
+    fi
+
+    # Add the MCP to Claude Code
+    claude mcp remove gmail 2>/dev/null || true
+    if claude mcp add --scope user gmail -- npx -y @gongrzhe/server-gmail-autoauth-mcp; then
+        echo "  ✓ Gmail MCP added to Claude Code (send + read)"
+        mark_done 7
+    else
+        echo "  ✗ Failed to add Gmail MCP to Claude Code."
+        step_failed 7
+    fi
+fi
+echo ""
+
+# =========================================================================
+# Step 8: Folder structure
+# =========================================================================
+echo "[8/8] Creating your Chief of Staff folder structure..."
 if step_done 7; then
     echo "  ✓ Folder structure already created (skipped)"
 else
@@ -371,10 +442,27 @@ rm -f "$SANITY_LOG"
 
 # Check 2: google MCP is registered in Claude Code config
 export PATH="$HOME/.local/bin:$PATH"
-if claude mcp list 2>/dev/null | grep -q "google"; then
+MCP_LIST=$(claude mcp list 2>/dev/null)
+if echo "$MCP_LIST" | grep -q "google"; then
     echo "  ✓ Google MCP is registered in Claude Code"
 else
     echo "  ⚠ WARNING: Google MCP not found in Claude Code config."
+    SANITY_PASSED=false
+fi
+
+# Check 3: gmail MCP is registered (needed for sending email)
+if echo "$MCP_LIST" | grep -q "gmail"; then
+    echo "  ✓ Gmail MCP is registered in Claude Code (send + read)"
+else
+    echo "  ⚠ WARNING: Gmail MCP not found — you won't be able to send email."
+    SANITY_PASSED=false
+fi
+
+# Check 4: gmail credentials.json exists (proves auth completed)
+if [ -f ~/.gmail-mcp/credentials.json ]; then
+    echo "  ✓ Gmail OAuth token found at ~/.gmail-mcp/credentials.json"
+else
+    echo "  ⚠ WARNING: No Gmail OAuth token found. Re-run the auth step."
     SANITY_PASSED=false
 fi
 
@@ -404,6 +492,7 @@ echo ""
 echo "  Try asking:"
 echo '    "What'\''s on my calendar this week?"'
 echo '    "Show me my latest unread emails"'
+echo '    "Draft an email to myself saying hello"'
 echo ""
 echo "  If something isn't working, raise your hand — we're here to help!"
 echo ""
