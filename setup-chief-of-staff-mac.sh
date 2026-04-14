@@ -98,9 +98,13 @@ else
     echo "  Claude Code not found. Installing..."
     if curl -fsSL https://claude.ai/install.sh | bash; then
         export PATH="$HOME/.local/bin:$PATH"
-        if ! grep -q '.local/bin' ~/.zshrc 2>/dev/null; then
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-        fi
+        # Write PATH to both shell profiles so it persists regardless of shell (zsh or bash)
+        for RC_FILE in ~/.zshrc ~/.bash_profile; do
+            [ ! -f "$RC_FILE" ] && touch "$RC_FILE"
+            if ! grep -q '.local/bin' "$RC_FILE" 2>/dev/null; then
+                echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$RC_FILE"
+            fi
+        done
         echo "  ✓ Claude Code installed"
         mark_done 1
     else
@@ -122,12 +126,21 @@ elif [ "$IS_ADMIN" = true ]; then
     echo "  Homebrew not found. Installing (this may take a few minutes)..."
     echo "  You may be asked for your Mac password."
     if /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
-        # Add Homebrew to PATH for Apple Silicon
+        # Add Homebrew to PATH (Apple Silicon: /opt/homebrew; Intel: /usr/local)
+        BREW_PATH=""
         if [ -f /opt/homebrew/bin/brew ]; then
-            eval "$(/opt/homebrew/bin/brew shellenv)"
-            if ! grep -q 'homebrew' ~/.zshrc 2>/dev/null; then
-                echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zshrc
-            fi
+            BREW_PATH="/opt/homebrew/bin/brew"
+        elif [ -f /usr/local/bin/brew ]; then
+            BREW_PATH="/usr/local/bin/brew"
+        fi
+        if [ -n "$BREW_PATH" ]; then
+            eval "$($BREW_PATH shellenv)"
+            for RC_FILE in ~/.zshrc ~/.bash_profile; do
+                [ ! -f "$RC_FILE" ] && touch "$RC_FILE"
+                if ! grep -q 'brew shellenv' "$RC_FILE" 2>/dev/null; then
+                    echo "eval \"\$($BREW_PATH shellenv)\"" >> "$RC_FILE"
+                fi
+            done
         fi
         echo "  ✓ Homebrew installed"
         mark_done 2
@@ -211,24 +224,38 @@ echo ""
 # Step 4: Save credentials
 # =========================================================================
 echo "[4/8] Saving your Google credentials..."
-if step_done "credentials_saved"; then
-    # Still update in case user provided new credentials this run
-    if [ -f ~/.zshrc ]; then
-        sed -i '' '/GOOGLE_CLIENT_ID/d' ~/.zshrc 2>/dev/null || true
-        sed -i '' '/GOOGLE_CLIENT_SECRET/d' ~/.zshrc 2>/dev/null || true
-    fi
-fi
 
-# Always write current credentials
-if [ -f ~/.zshrc ]; then
-    sed -i '' '/GOOGLE_CLIENT_ID/d' ~/.zshrc 2>/dev/null || true
-    sed -i '' '/GOOGLE_CLIENT_SECRET/d' ~/.zshrc 2>/dev/null || true
-fi
+# Write credentials to BOTH shell profiles (zsh AND bash) so they load regardless of shell
+for RC_FILE in ~/.zshrc ~/.bash_profile; do
+    [ ! -f "$RC_FILE" ] && touch "$RC_FILE"
+    sed -i '' '/GOOGLE_CLIENT_ID/d' "$RC_FILE" 2>/dev/null || true
+    sed -i '' '/GOOGLE_CLIENT_SECRET/d' "$RC_FILE" 2>/dev/null || true
+    echo "export GOOGLE_CLIENT_ID=\"$CLIENT_ID\"" >> "$RC_FILE"
+    echo "export GOOGLE_CLIENT_SECRET=\"$CLIENT_SECRET\"" >> "$RC_FILE"
+done
 
-echo "export GOOGLE_CLIENT_ID=\"$CLIENT_ID\"" >> ~/.zshrc
-echo "export GOOGLE_CLIENT_SECRET=\"$CLIENT_SECRET\"" >> ~/.zshrc
+# Also write shell-independent config file for google-mcp-server.
+# This is the primary source of truth — the binary reads this regardless of shell.
+# Fixes the case where bash users don't load env vars from .zshrc.
+mkdir -p ~/.google-mcp-server
+cat > ~/.google-mcp-server/config.json <<ENDOFCONFIG
+{
+  "oauth": {
+    "client_id": "$CLIENT_ID",
+    "client_secret": "$CLIENT_SECRET",
+    "redirect_uri": "http://localhost:8080/callback"
+  },
+  "services": {
+    "calendar": {"enabled": true},
+    "drive": {"enabled": true},
+    "gmail": {"enabled": true},
+    "sheets": {"enabled": true},
+    "docs": {"enabled": true}
+  }
+}
+ENDOFCONFIG
 
-echo "  ✓ Credentials saved"
+echo "  ✓ Credentials saved to ~/.zshrc, ~/.bash_profile, and ~/.google-mcp-server/config.json"
 mark_done "credentials_saved"
 echo ""
 
@@ -338,19 +365,47 @@ else
         step_failed 7
     fi
 
-    # Locate the OAuth JSON (auto-search Downloads, then Desktop)
-    GMAIL_JSON=""
+    # Locate the OAuth JSON — robust search across common locations and filenames
     if [ -f ~/.gmail-mcp/gcp-oauth.keys.json ]; then
         echo "  ✓ Found existing OAuth keys at ~/.gmail-mcp/gcp-oauth.keys.json"
     else
         mkdir -p ~/.gmail-mcp
-        FOUND_JSON=$(ls ~/Downloads/client_secret_*.json 2>/dev/null | head -1)
+        FOUND_JSON=""
+
+        # Pass 1: standard Google Cloud filename in common locations
+        for DIR in ~/Downloads ~/Desktop ~/Documents; do
+            if [ -d "$DIR" ]; then
+                CANDIDATE=$(ls "$DIR"/client_secret_*.json 2>/dev/null | head -1)
+                if [ -n "$CANDIDATE" ]; then
+                    FOUND_JSON="$CANDIDATE"
+                    break
+                fi
+            fi
+        done
+
+        # Pass 2: Spotlight search system-wide for client_secret-named files
+        if [ -z "$FOUND_JSON" ] && command -v mdfind &> /dev/null; then
+            FOUND_JSON=$(mdfind -name "client_secret_" 2>/dev/null | grep '\.json$' | head -1)
+        fi
+
+        # Pass 3: validate ANY .json in common locations by content (client_id + client_secret)
+        # Catches cases where the user renamed the file
         if [ -z "$FOUND_JSON" ]; then
-            FOUND_JSON=$(ls ~/Desktop/client_secret_*.json 2>/dev/null | head -1)
+            for DIR in ~/Downloads ~/Desktop ~/Documents; do
+                if [ -d "$DIR" ]; then
+                    for F in "$DIR"/*.json; do
+                        [ -f "$F" ] || continue
+                        if grep -q '"client_id"' "$F" 2>/dev/null && grep -q '"client_secret"' "$F" 2>/dev/null; then
+                            FOUND_JSON="$F"
+                            break 2
+                        fi
+                    done
+                fi
+            done
         fi
 
         if [ -n "$FOUND_JSON" ]; then
-            echo "  Found OAuth file: $(basename "$FOUND_JSON")"
+            echo "  Found OAuth file: $FOUND_JSON"
             read -p "  Use this file? (y/n): " USE_FOUND
             if [ "$USE_FOUND" = "y" ] || [ "$USE_FOUND" = "Y" ]; then
                 cp "$FOUND_JSON" ~/.gmail-mcp/gcp-oauth.keys.json
@@ -363,7 +418,7 @@ else
                 echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
             fi
         else
-            echo "  No client_secret_*.json found in Downloads or Desktop."
+            echo "  No OAuth JSON found in Downloads, Desktop, Documents, or via Spotlight."
             echo "  Drag the JSON file from Finder into this terminal window, then press Enter:"
             read -p "  > " DRAGGED_PATH
             DRAGGED_PATH=$(echo "$DRAGGED_PATH" | sed "s/^['\"]//;s/['\"]$//")
@@ -384,6 +439,29 @@ else
         echo "  ✓ Gmail authenticated"
     else
         echo "  ⚠ Gmail auth did not complete cleanly. You can re-run this script to retry."
+        step_failed 7
+    fi
+
+    # Verify the granted scope actually includes SEND permission.
+    # If the user unchecked "Send email on your behalf" during consent, the token
+    # will only have read scope and send will silently fail later.
+    if [ -f ~/.gmail-mcp/credentials.json ]; then
+        if grep -q 'gmail.modify\|mail.google.com' ~/.gmail-mcp/credentials.json; then
+            echo "  ✓ Gmail send permission granted"
+        else
+            echo ""
+            echo "  ✗ ERROR: Gmail send permission was NOT granted."
+            echo "  You probably unchecked 'Send email on your behalf' on the consent screen."
+            echo "  Claude won't be able to send mail until you re-auth with send permission."
+            echo ""
+            echo "  To fix: delete the token and re-run this script:"
+            echo "    rm ~/.gmail-mcp/credentials.json"
+            echo "    bash <(curl -fsSL https://raw.githubusercontent.com/ariellgalipeau/claude-workflows/main/setup-chief-of-staff-mac.sh)"
+            echo ""
+            step_failed 7
+        fi
+    else
+        echo "  ✗ ERROR: Gmail auth completed but no credentials.json was written."
         step_failed 7
     fi
 
@@ -450,27 +528,42 @@ else
 fi
 rm -f "$SANITY_LOG"
 
-# Check 2: google MCP is registered in Claude Code config
+# Check 2: google MCP is registered AND actually connects from Claude Code
 export PATH="$HOME/.local/bin:$PATH"
-MCP_LIST=$(claude mcp list 2>/dev/null)
-if echo "$MCP_LIST" | grep -q "google"; then
-    echo "  ✓ Google MCP is registered in Claude Code"
+MCP_LIST=$(claude mcp list 2>&1)
+if echo "$MCP_LIST" | grep "^google:" | grep -q "✓ Connected"; then
+    echo "  ✓ Google MCP is registered AND connected"
+elif echo "$MCP_LIST" | grep -q "^google:"; then
+    echo "  ⚠ WARNING: Google MCP is registered but NOT connecting (server crash on startup)."
+    echo "    This usually means the binary can't find credentials. Try:"
+    echo "      bash <(curl -fsSL https://raw.githubusercontent.com/ariellgalipeau/claude-workflows/main/fix-google-mcp.sh)"
+    SANITY_PASSED=false
 else
     echo "  ⚠ WARNING: Google MCP not found in Claude Code config."
     SANITY_PASSED=false
 fi
 
-# Check 3: gmail MCP is registered (needed for sending email)
-if echo "$MCP_LIST" | grep -q "gmail"; then
-    echo "  ✓ Gmail MCP is registered in Claude Code (send + read)"
+# Check 3: gmail MCP is registered AND actually connects
+if echo "$MCP_LIST" | grep "^gmail:" | grep -q "✓ Connected"; then
+    echo "  ✓ Gmail MCP is registered AND connected (send + read)"
+elif echo "$MCP_LIST" | grep -q "^gmail:"; then
+    echo "  ⚠ WARNING: Gmail MCP is registered but NOT connecting."
+    SANITY_PASSED=false
 else
     echo "  ⚠ WARNING: Gmail MCP not found — you won't be able to send email."
     SANITY_PASSED=false
 fi
 
-# Check 4: gmail credentials.json exists (proves auth completed)
+# Check 4: gmail credentials.json exists AND has send scope
 if [ -f ~/.gmail-mcp/credentials.json ]; then
-    echo "  ✓ Gmail OAuth token found at ~/.gmail-mcp/credentials.json"
+    if grep -q 'gmail.modify\|mail.google.com' ~/.gmail-mcp/credentials.json; then
+        echo "  ✓ Gmail OAuth token has send permission"
+    else
+        echo "  ⚠ WARNING: Gmail OAuth token is READ-ONLY (no send permission)."
+        echo "    You likely unchecked 'Send email on your behalf' during consent."
+        echo "    Fix: rm ~/.gmail-mcp/credentials.json and re-run this script."
+        SANITY_PASSED=false
+    fi
 else
     echo "  ⚠ WARNING: No Gmail OAuth token found. Re-run the auth step."
     SANITY_PASSED=false
