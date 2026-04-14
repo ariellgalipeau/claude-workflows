@@ -24,6 +24,18 @@ if ($PSVersionTable.PSVersion.Major -ge 7 -and $PSVersionTable.PSVersion.Minor -
     $PSNativeCommandUseErrorActionPreference = $true
 }
 
+# --- Force TLS 1.2 for all web requests ---
+# Windows PowerShell 5.1 defaults to TLS 1.0/1.1, which Google (and most modern APIs)
+# rejected years ago. Without this, Invoke-RestMethod calls to oauth2.googleapis.com
+# fail with "Could not create SSL/TLS secure channel" on unpatched Windows 10.
+# No-op on PS 7+, which defaults to TLS 1.2+.
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {
+    # Old .NET may not have Tls12 enum member; fall back to common value
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+}
+
 # --- Checkpoint system ---
 $CheckpointDir = Join-Path $env:USERPROFILE ".chief-setup"
 if (-not (Test-Path $CheckpointDir)) {
@@ -44,6 +56,75 @@ function Step-Failed($step) {
     Write-Host "  Fix the issue above, then re-run this script." -ForegroundColor Red
     Write-Host "  Completed steps will be skipped automatically." -ForegroundColor Yellow
     exit 1
+}
+
+# --- Helpers: find claude.exe broadly, persist PATH, locate OAuth JSON ---
+
+function Find-ClaudeExe {
+    # Fast path: already on PATH in current session
+    $cmd = Get-Command claude -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    # Known install locations across different Windows install patterns
+    $knownPaths = @(
+        "$env:USERPROFILE\.local\bin\claude.exe",
+        "$env:LOCALAPPDATA\Programs\claude\claude.exe",
+        "$env:LOCALAPPDATA\Programs\anthropic\claude\claude.exe",
+        "$env:APPDATA\npm\claude.cmd",
+        "$env:ProgramFiles\Claude\claude.exe",
+        "${env:ProgramFiles(x86)}\Claude\claude.exe",
+        "$env:USERPROFILE\AppData\Roaming\claude\claude.exe"
+    )
+    foreach ($p in $knownPaths) {
+        if (Test-Path $p) { return $p }
+    }
+
+    # Last resort: targeted deep scan (user folders only, depth-limited)
+    $found = Get-ChildItem -Path $env:USERPROFILE, $env:LOCALAPPDATA, $env:APPDATA `
+        -Recurse -Filter "claude.exe" -Depth 5 -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { return $found.FullName }
+    return $null
+}
+
+function Register-ClaudeInPath {
+    param([string]$claudeExe)
+    $claudeDir = Split-Path $claudeExe -Parent
+
+    # Permanent User PATH (survives new PowerShell windows and reboots)
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($userPath -notlike "*$claudeDir*") {
+        [Environment]::SetEnvironmentVariable("Path", "$userPath;$claudeDir", "User")
+        Write-Host "  Added $claudeDir to permanent User PATH" -ForegroundColor Green
+    }
+
+    # Current session PATH so the rest of this script can find claude
+    if ($env:Path -notlike "*$claudeDir*") {
+        $env:Path = "$env:Path;$claudeDir"
+    }
+}
+
+function Find-OAuthJson {
+    param([string[]]$searchDirs = @("$env:USERPROFILE\Downloads", "$env:USERPROFILE\Desktop"))
+
+    foreach ($dir in $searchDirs) {
+        if (-not (Test-Path $dir)) { continue }
+
+        # Pass 1: Google's default filename pattern
+        $byPattern = Get-ChildItem -Path "$dir\client_secret_*.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($byPattern) { return $byPattern }
+
+        # Pass 2: content-sniff any .json (catches renamed files)
+        $allJson = Get-ChildItem -Path "$dir\*.json" -ErrorAction SilentlyContinue
+        foreach ($f in $allJson) {
+            try {
+                $c = Get-Content $f.FullName -Raw | ConvertFrom-Json
+                if ($c.installed -and $c.installed.client_id -and $c.installed.client_secret) {
+                    return $f
+                }
+            } catch { continue }
+        }
+    }
+    return $null
 }
 
 Write-Host ""
@@ -104,24 +185,36 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 # Step 1: Check Claude Code
 # =========================================================================
 Write-Host "[1/7] Checking Claude Code..." -ForegroundColor Yellow
-if ((Step-Done 1) -and (Get-Command claude -ErrorAction SilentlyContinue)) {
-    Write-Host "  Claude Code is installed (skipped)" -ForegroundColor Green
-} elseif (Get-Command claude -ErrorAction SilentlyContinue) {
-    Write-Host "  Claude Code is installed" -ForegroundColor Green
-    Mark-Done 1
+
+$claudeExe = Find-ClaudeExe
+if ($claudeExe) {
+    if (Step-Done 1) {
+        Write-Host "  Claude Code is installed at $claudeExe (skipped)" -ForegroundColor Green
+    } else {
+        Write-Host "  Claude Code is installed at $claudeExe" -ForegroundColor Green
+        Mark-Done 1
+    }
+    Register-ClaudeInPath $claudeExe
 } else {
     Write-Host "  Claude Code not found. Installing..."
     try {
         irm https://claude.ai/install.ps1 | iex
-        Write-Host "  Claude Code installed" -ForegroundColor Green
-        Write-Host "  NOTE: You may need to close and reopen PowerShell, then run this script again." -ForegroundColor Yellow
-        Mark-Done 1
-        Write-Host ""
-        Read-Host "  Press Enter to continue (or close PowerShell and reopen if claude isn't found)"
     } catch {
         Write-Host "  Claude Code install failed: $_" -ForegroundColor Red
         Step-Failed 1
     }
+
+    # After install, search broadly for the binary (installer doesn't always patch session PATH)
+    $claudeExe = Find-ClaudeExe
+    if (-not $claudeExe) {
+        Write-Host "  Installed, but can't locate claude.exe in any known location." -ForegroundColor Red
+        Write-Host "  Close PowerShell, reopen, and re-run this script." -ForegroundColor Yellow
+        Step-Failed 1
+    }
+
+    Register-ClaudeInPath $claudeExe
+    Write-Host "  Claude Code installed at $claudeExe" -ForegroundColor Green
+    Mark-Done 1
 }
 Write-Host ""
 
@@ -338,30 +431,37 @@ if (Step-Done 6) {
     if (Test-Path $gmailKeysFile) {
         Write-Host "  Found existing OAuth keys at $gmailKeysFile" -ForegroundColor Green
     } else {
-        $foundJson = Get-ChildItem -Path "$env:USERPROFILE\Downloads\client_secret_*.json","$env:USERPROFILE\Desktop\client_secret_*.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $foundJson = Find-OAuthJson
 
         if ($foundJson) {
             Write-Host "  Found OAuth file: $($foundJson.Name)" -ForegroundColor Green
-            $useFound = Read-Host "  Use this file? (y/n)"
-            if ($useFound -eq "y" -or $useFound -eq "Y") {
+            Copy-Item $foundJson.FullName $gmailKeysFile -Force
+            Write-Host "  Copied to $gmailKeysFile" -ForegroundColor Green
+        } else {
+            Write-Host "  No OAuth JSON file found in Downloads or Desktop." -ForegroundColor Yellow
+            Write-Host "  Opening your Downloads folder." -ForegroundColor White
+            Write-Host "  Drop your JSON file in there (exact name doesn't matter), then press Enter." -ForegroundColor White
+            Start-Process explorer.exe -ArgumentList "$env:USERPROFILE\Downloads"
+            Read-Host "  Press Enter once the file is in Downloads"
+
+            # Re-scan
+            $foundJson = Find-OAuthJson
+            if ($foundJson) {
+                Write-Host "  Found: $($foundJson.Name)" -ForegroundColor Green
                 Copy-Item $foundJson.FullName $gmailKeysFile -Force
                 Write-Host "  Copied to $gmailKeysFile" -ForegroundColor Green
             } else {
-                Write-Host "  Right-click the JSON file in File Explorer and choose 'Copy as path',"
-                Write-Host "  then right-click in this window to paste:"
+                Write-Host "  Still no valid OAuth JSON found. Paste the full path manually:" -ForegroundColor Yellow
+                Write-Host "  (Right-click the file in File Explorer, 'Copy as path', then right-click to paste)"
                 $manualPath = Read-Host "  Path to JSON file"
                 $manualPath = $manualPath.Trim('"').Trim("'")
+                if (-not (Test-Path $manualPath)) {
+                    Write-Host "  File not found at: $manualPath" -ForegroundColor Red
+                    Step-Failed 6
+                }
                 Copy-Item $manualPath $gmailKeysFile -Force
                 Write-Host "  Copied to $gmailKeysFile" -ForegroundColor Green
             }
-        } else {
-            Write-Host "  No client_secret_*.json found in Downloads or Desktop." -ForegroundColor Yellow
-            Write-Host "  Right-click the JSON file in File Explorer and choose 'Copy as path',"
-            Write-Host "  then right-click in this window to paste:"
-            $manualPath = Read-Host "  Path to JSON file"
-            $manualPath = $manualPath.Trim('"').Trim("'")
-            Copy-Item $manualPath $gmailKeysFile -Force
-            Write-Host "  Copied to $gmailKeysFile" -ForegroundColor Green
         }
     }
 
@@ -375,9 +475,72 @@ if (Step-Done 6) {
     Read-Host "  Press Enter to open the browser"
     try {
         npx -y "@gongrzhe/server-gmail-autoauth-mcp" auth
-        Write-Host "  Gmail authenticated" -ForegroundColor Green
+        Write-Host "  Gmail browser auth completed" -ForegroundColor Green
     } catch {
         Write-Host "  Gmail auth did not complete cleanly: $_" -ForegroundColor Red
+        Step-Failed 6
+    }
+
+    # Verify credentials.json was written and has a valid refresh token
+    if (-not (Test-Path $gmailCredsFile)) {
+        Write-Host "  ERROR: Auth completed but no token was written at $gmailCredsFile" -ForegroundColor Red
+        Write-Host "  The browser flow may have closed too early. Re-run the script." -ForegroundColor Yellow
+        Step-Failed 6
+    }
+
+    try {
+        $creds = Get-Content $gmailCredsFile -Raw | ConvertFrom-Json
+    } catch {
+        Write-Host "  ERROR: credentials.json is malformed." -ForegroundColor Red
+        Remove-Item $gmailCredsFile -Force
+        Step-Failed 6
+    }
+
+    if (-not $creds.refresh_token) {
+        Write-Host "  ERROR: Token file missing refresh_token. Re-auth required." -ForegroundColor Red
+        Remove-Item $gmailCredsFile -Force
+        Step-Failed 6
+    }
+
+    # Confirm Gmail send scope was granted (modify covers send)
+    $grantedScope = "$($creds.scope) $($creds.granted_scopes)"
+    if ($grantedScope -notmatch "gmail\.(send|modify)") {
+        Write-Host "  ERROR: Gmail SEND permission was NOT granted." -ForegroundColor Red
+        Write-Host "  On the Google consent screen, the 'Send email on your behalf' box was unchecked." -ForegroundColor Yellow
+        Write-Host "  Deleting token and asking you to re-auth..." -ForegroundColor Yellow
+        Remove-Item $gmailCredsFile -Force
+        Step-Failed 6
+    }
+    Write-Host "  Token verified (send scope granted)" -ForegroundColor Green
+
+    # Actually send a test email to confirm end-to-end that Gmail send works
+    Write-Host "  Sending a test email to confirm Gmail send is working..." -ForegroundColor White
+    try {
+        $tokenResp = Invoke-RestMethod -Uri "https://oauth2.googleapis.com/token" -Method Post -Body @{
+            client_id = $CLIENT_ID
+            client_secret = $CLIENT_SECRET
+            refresh_token = $creds.refresh_token
+            grant_type = "refresh_token"
+        }
+        $accessToken = $tokenResp.access_token
+
+        # Use Gmail's own profile endpoint (works with gmail.modify scope; oauth2/userinfo requires a separate scope)
+        $gmailProfile = Invoke-RestMethod -Uri "https://gmail.googleapis.com/gmail/v1/users/me/profile" `
+            -Headers @{Authorization = "Bearer $accessToken"}
+        $userEmail = $gmailProfile.emailAddress
+
+        $raw = "From: $userEmail`r`nTo: $userEmail`r`nSubject: LBL Setup - Gmail send verified`r`n`r`nYour Chief of Staff can now send email on your behalf. You can delete this message."
+        $encoded = ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($raw))) -replace '\+','-' -replace '/','_' -replace '=',''
+
+        Invoke-RestMethod -Uri "https://gmail.googleapis.com/gmail/v1/users/me/messages/send" -Method Post `
+            -Headers @{Authorization = "Bearer $accessToken"} `
+            -ContentType "application/json" -Body (@{raw = $encoded} | ConvertTo-Json) | Out-Null
+        Write-Host "  Gmail send CONFIRMED — check $userEmail for a test message" -ForegroundColor Green
+    } catch {
+        Write-Host "  Test email FAILED: $_" -ForegroundColor Red
+        Write-Host "  Auth looked right, but Gmail send is not working." -ForegroundColor Yellow
+        Write-Host "  Most likely: Gmail API is not enabled in your Google Cloud project," -ForegroundColor Yellow
+        Write-Host "  OR your OAuth consent screen is still in Testing mode without your email added as a test user." -ForegroundColor Yellow
         Step-Failed 6
     }
 
@@ -467,9 +630,20 @@ try {
     $sanityPassed = $false
 }
 
-# Check 4: gmail credentials.json exists (proves Gmail auth completed)
+# Check 4: gmail credentials.json exists AND has a usable refresh token
 if (Test-Path $gmailCredsFile) {
-    Write-Host "  Gmail OAuth token found at $gmailCredsFile" -ForegroundColor Green
+    try {
+        $credsCheck = Get-Content $gmailCredsFile -Raw | ConvertFrom-Json
+        if ($credsCheck.refresh_token -and "$($credsCheck.scope) $($credsCheck.granted_scopes)" -match "gmail\.(send|modify)") {
+            Write-Host "  Gmail OAuth token verified (send scope granted)" -ForegroundColor Green
+        } else {
+            Write-Host "  WARNING: Gmail token present but missing send scope or refresh_token." -ForegroundColor Yellow
+            $sanityPassed = $false
+        }
+    } catch {
+        Write-Host "  WARNING: Gmail token file is malformed." -ForegroundColor Yellow
+        $sanityPassed = $false
+    }
 } else {
     Write-Host "  WARNING: No Gmail OAuth token found. Re-run the auth step." -ForegroundColor Yellow
     $sanityPassed = $false
@@ -527,7 +701,12 @@ Write-Host ""
 Write-Host "  If something isn't working, raise your hand — we're here to help!"
 Write-Host ""
 
-# Clean up checkpoints on successful completion
-Write-Host "  (Cleaning up setup checkpoints...)"
-Remove-Item -Path $CheckpointDir -Recurse -Force -ErrorAction SilentlyContinue
+# Clean up checkpoints only on a fully successful run.
+# If sanity failed, keep checkpoints so the user can re-run and resume.
+if ($sanityPassed) {
+    Write-Host "  (Cleaning up setup checkpoints...)"
+    Remove-Item -Path $CheckpointDir -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    Write-Host "  (Leaving checkpoints in place so you can re-run to fix remaining issues.)" -ForegroundColor Yellow
+}
 Write-Host ""
