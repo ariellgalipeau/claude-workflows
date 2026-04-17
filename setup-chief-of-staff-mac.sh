@@ -195,28 +195,15 @@ elif command -v brew &> /dev/null; then
     echo "$GOOGLE_MCP_PATH" > "$CHECKPOINT_DIR/google_mcp_path"
     mark_done 3
 else
-    # Non-admin fallback: use npx
-    echo "  Using npx to run google-mcp-server (no Homebrew needed)..."
-    # Verify npx/node is available
-    if command -v npx &> /dev/null; then
-        GOOGLE_MCP_PATH="npx"
-        echo "npx" > "$CHECKPOINT_DIR/google_mcp_path"
-        echo "  ✓ Will use npx for google-mcp-server"
-        mark_done 3
-    else
-        echo "  ⚠ npx not found. Checking for Node.js..."
-        if command -v node &> /dev/null; then
-            GOOGLE_MCP_PATH="npx"
-            echo "npx" > "$CHECKPOINT_DIR/google_mcp_path"
-            echo "  ✓ Node.js found, will use npx"
-            mark_done 3
-        else
-            echo ""
-            echo "  Neither Homebrew nor Node.js is available."
-            echo "  Please ask a facilitator for help, or install Node.js from https://nodejs.org"
-            step_failed 3
-        fi
-    fi
+    # No Homebrew available — google-mcp-server requires Homebrew on Mac
+    echo ""
+    echo "  ✗ ERROR: Homebrew is required to install google-mcp-server."
+    echo "  Install Homebrew first by running this in Terminal:"
+    echo '    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    echo "  Then close Terminal, reopen it, and re-run this script."
+    echo ""
+    echo "  If you can't install Homebrew (no admin access), ask a facilitator for help."
+    step_failed 3
 fi
 echo ""
 
@@ -280,11 +267,7 @@ if step_done 5; then
         echo "  After you see the success message, come back here and press Control + C."
         echo ""
         read -p "  Press Enter to open the browser..." _dummy
-        if [ "$GOOGLE_MCP_PATH" = "npx" ]; then
-            npx -y @anthropic-ai/google-mcp-server || true
-        else
-            $GOOGLE_MCP_PATH || true
-        fi
+        $GOOGLE_MCP_PATH || true
         echo ""
         echo "  ✓ Google Calendar + Drive authenticated"
     fi
@@ -299,11 +282,7 @@ else
     echo "  After you see the success message, come back here and press Control + C."
     echo ""
     read -p "  Press Enter to open the browser..." _dummy
-    if [ "$GOOGLE_MCP_PATH" = "npx" ]; then
-        npx -y @anthropic-ai/google-mcp-server || true
-    else
-        $GOOGLE_MCP_PATH || true
-    fi
+    $GOOGLE_MCP_PATH || true
     echo ""
     echo "  ✓ Google Calendar + Drive authenticated"
     mark_done 5
@@ -335,11 +314,7 @@ else
     claude mcp remove gmail 2>/dev/null || true
 
     # Add Google (covers Calendar, Drive, Gmail, Slides with one auth)
-    if [ "$GOOGLE_MCP_PATH" = "npx" ]; then
-        claude mcp add --scope user google -- npx -y @anthropic-ai/google-mcp-server
-    else
-        claude mcp add --scope user google "$GOOGLE_MCP_PATH"
-    fi
+    claude mcp add --scope user google "$GOOGLE_MCP_PATH"
     echo "  ✓ Google connection added (Calendar, Drive, Gmail, Slides)"
     mark_done 6
 fi
@@ -357,12 +332,24 @@ if step_done 7; then
 else
     # Verify npx is available — Gmail MCP requires Node.js
     if ! command -v npx &> /dev/null; then
-        echo "  ✗ ERROR: npx not found on your PATH."
-        echo "  The Gmail MCP requires Node.js. Install it via one of:"
-        echo "    brew install node           # if you have Homebrew"
-        echo "    https://nodejs.org/         # download the macOS LTS installer"
-        echo "  After installing, close Terminal, reopen it, and re-run this script."
-        step_failed 7
+        echo "  npx not found. The Gmail MCP requires Node.js."
+        # Try auto-installing via Homebrew if available
+        if command -v brew &> /dev/null; then
+            echo "  Homebrew detected — installing Node.js automatically..."
+            if brew install node; then
+                echo "  ✓ Node.js installed via Homebrew"
+            else
+                echo "  ✗ ERROR: Failed to install Node.js via Homebrew."
+                echo "  Install it manually from https://nodejs.org/en/download"
+                echo "  After installing, close Terminal, reopen it, and re-run this script."
+                step_failed 7
+            fi
+        else
+            echo "  ✗ ERROR: npx not found and Homebrew is not available."
+            echo "  Install Node.js from https://nodejs.org/en/download"
+            echo "  After installing, close Terminal, reopen it, and re-run this script."
+            step_failed 7
+        fi
     fi
 
     # Locate the OAuth JSON — robust search across common locations and filenames
@@ -481,7 +468,7 @@ echo ""
 # Step 8: Folder structure
 # =========================================================================
 echo "[8/8] Creating your Chief of Staff folder structure..."
-if step_done 7; then
+if step_done 8; then
     echo "  ✓ Folder structure already created (skipped)"
 else
     mkdir -p ~/chief/about-me
@@ -498,7 +485,7 @@ else
     fi
 
     echo "  ✓ Folder structure created"
-    mark_done 7
+    mark_done 8
 fi
 echo ""
 
@@ -510,11 +497,7 @@ SANITY_PASSED=true
 
 # Check 1: google-mcp-server binary responds with expected startup output
 SANITY_LOG=$(mktemp)
-if [ "$GOOGLE_MCP_PATH" = "npx" ]; then
-    (npx -y @anthropic-ai/google-mcp-server > "$SANITY_LOG" 2>&1) &
-else
-    ("$GOOGLE_MCP_PATH" > "$SANITY_LOG" 2>&1) &
-fi
+("$GOOGLE_MCP_PATH" > "$SANITY_LOG" 2>&1) &
 SANITY_PID=$!
 sleep 3
 kill "$SANITY_PID" 2>/dev/null || true
