@@ -473,7 +473,7 @@ if step_done 8; then
 else
     mkdir -p ~/chief/about-me
     mkdir -p ~/chief/memory/conversations
-    mkdir -p ~/chief/Tools
+    mkdir -p ~/chief/Skills
     mkdir -p ~/chief/Notes
     touch ~/chief/memory/memory.md
     touch ~/chief/memory/context.txt

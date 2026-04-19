@@ -570,7 +570,7 @@ if (Step-Done 7) {
     $folders = @(
         "$chiefPath\about-me",
         "$chiefPath\memory\conversations",
-        "$chiefPath\Tools",
+        "$chiefPath\Skills",
         "$chiefPath\Notes"
     )
 
