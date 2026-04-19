@@ -395,22 +395,37 @@ else
             echo "  Found OAuth file: $FOUND_JSON"
             read -p "  Use this file? (y/n): " USE_FOUND
             if [ "$USE_FOUND" = "y" ] || [ "$USE_FOUND" = "Y" ]; then
-                cp "$FOUND_JSON" ~/.gmail-mcp/gcp-oauth.keys.json
-                echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
+                if cp "$FOUND_JSON" ~/.gmail-mcp/gcp-oauth.keys.json; then
+                    echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
+                else
+                    echo "  ✗ ERROR: Failed to copy $FOUND_JSON"
+                    echo "  Make sure the file exists and try again."
+                    step_failed 7
+                fi
             else
                 echo "  Drag the JSON file from Finder into this terminal window, then press Enter:"
                 read -p "  > " DRAGGED_PATH
                 DRAGGED_PATH=$(echo "$DRAGGED_PATH" | sed "s/^['\"]//;s/['\"]$//")
-                cp "$DRAGGED_PATH" ~/.gmail-mcp/gcp-oauth.keys.json
-                echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
+                if cp "$DRAGGED_PATH" ~/.gmail-mcp/gcp-oauth.keys.json; then
+                    echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
+                else
+                    echo "  ✗ ERROR: Could not copy that file. Make sure you dragged the actual"
+                    echo "  JSON file (not a URL or other text) into the terminal window."
+                    step_failed 7
+                fi
             fi
         else
             echo "  No OAuth JSON found in Downloads, Desktop, Documents, or via Spotlight."
             echo "  Drag the JSON file from Finder into this terminal window, then press Enter:"
             read -p "  > " DRAGGED_PATH
             DRAGGED_PATH=$(echo "$DRAGGED_PATH" | sed "s/^['\"]//;s/['\"]$//")
-            cp "$DRAGGED_PATH" ~/.gmail-mcp/gcp-oauth.keys.json
-            echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
+            if cp "$DRAGGED_PATH" ~/.gmail-mcp/gcp-oauth.keys.json; then
+                echo "  ✓ Copied to ~/.gmail-mcp/gcp-oauth.keys.json"
+            else
+                echo "  ✗ ERROR: Could not copy that file. Make sure you dragged the actual"
+                echo "  JSON file (not a URL or other text) into the terminal window."
+                step_failed 7
+            fi
         fi
     fi
 
