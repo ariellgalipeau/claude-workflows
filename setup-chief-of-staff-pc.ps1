@@ -223,9 +223,8 @@ Write-Host ""
 # =========================================================================
 Write-Host "[2/7] Setting up Google MCP server..." -ForegroundColor Yellow
 
-# Determine install location based on permissions
-$toolsDirAdmin = "C:\Tools"
-$toolsDirUser = Join-Path $env:LOCALAPPDATA "Programs\google-mcp-server"
+# Determine install location — matches the PC setup guide ($env:USERPROFILE\Tools)
+$toolsDir = Join-Path $env:USERPROFILE "Tools"
 $serverPath = $null
 
 if (Step-Done 2) {
@@ -244,26 +243,6 @@ if (Step-Done 2) {
 }
 
 if (-not (Step-Done 2)) {
-    # Try C:\Tools first if admin, otherwise use AppData
-    if ($isAdmin) {
-        $toolsDir = $toolsDirAdmin
-    } else {
-        # Try C:\Tools anyway (might be writable), fall back to AppData
-        try {
-            if (-not (Test-Path $toolsDirAdmin)) {
-                New-Item -Path $toolsDirAdmin -ItemType Directory -Force -ErrorAction Stop | Out-Null
-            }
-            # Test write access
-            $testFile = Join-Path $toolsDirAdmin ".write_test"
-            "test" | Out-File -FilePath $testFile -ErrorAction Stop
-            Remove-Item $testFile -Force
-            $toolsDir = $toolsDirAdmin
-        } catch {
-            Write-Host "  No admin access to C:\Tools. Using your AppData folder instead." -ForegroundColor Yellow
-            $toolsDir = $toolsDirUser
-        }
-    }
-
     $serverPath = Join-Path $toolsDir "google-mcp-server.exe"
 
     if (Test-Path $serverPath) {
@@ -389,7 +368,7 @@ if (Step-Done 5) {
 
     # Add Google (covers Calendar, Drive, Gmail, Slides with one auth)
     try {
-        claude mcp add --scope user google $serverPath
+        claude mcp add --scope user google "$serverPath"
         Write-Host "  Google connection added (Calendar, Drive, Gmail, Slides)" -ForegroundColor Green
     } catch {
         Write-Host "  Failed to add Google MCP: $_" -ForegroundColor Red
@@ -526,7 +505,7 @@ if (Step-Done 6) {
 
     # Confirm Gmail send scope was granted (modify covers send)
     $grantedScope = "$($creds.scope) $($creds.granted_scopes)"
-    if ($grantedScope -notmatch "gmail\.(send|modify)") {
+    if ($grantedScope -notmatch "gmail\.(send|modify)|mail\.google\.com") {
         Write-Host "  ERROR: Gmail SEND permission was NOT granted." -ForegroundColor Red
         Write-Host "  On the Google consent screen, the 'Send email on your behalf' box was unchecked." -ForegroundColor Yellow
         Write-Host "  Deleting token and asking you to re-auth..." -ForegroundColor Yellow
@@ -656,7 +635,7 @@ try {
 if (Test-Path $gmailCredsFile) {
     try {
         $credsCheck = Get-Content $gmailCredsFile -Raw | ConvertFrom-Json
-        if ($credsCheck.refresh_token -and "$($credsCheck.scope) $($credsCheck.granted_scopes)" -match "gmail\.(send|modify)") {
+        if ($credsCheck.refresh_token -and "$($credsCheck.scope) $($credsCheck.granted_scopes)" -match "gmail\.(send|modify)|mail\.google\.com") {
             Write-Host "  Gmail OAuth token verified (send scope granted)" -ForegroundColor Green
         } else {
             Write-Host "  WARNING: Gmail token present but missing send scope or refresh_token." -ForegroundColor Yellow
