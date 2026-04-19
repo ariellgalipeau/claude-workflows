@@ -473,7 +473,7 @@ if step_done 8; then
 else
     mkdir -p ~/chief/about-me
     mkdir -p ~/chief/memory/conversations
-    mkdir -p ~/chief/Skills
+    mkdir -p ~/chief/.claude/skills
     mkdir -p ~/chief/Notes
     touch ~/chief/memory/memory.md
     touch ~/chief/memory/context.txt
@@ -485,6 +485,11 @@ else
     fi
 
     echo "  ✓ Folder structure created"
+    echo ""
+    echo "  💡 Skills folder created at ~/chief/.claude/skills/"
+    echo "  Skills are instructions Claude discovers automatically."
+    echo "  Add a SKILL.md file to teach Claude a new capability."
+    echo "  Claude matches your requests to skill descriptions and activates them on its own."
     mark_done 8
 fi
 echo ""

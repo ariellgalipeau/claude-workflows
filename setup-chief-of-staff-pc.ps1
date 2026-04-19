@@ -570,7 +570,7 @@ if (Step-Done 7) {
     $folders = @(
         "$chiefPath\about-me",
         "$chiefPath\memory\conversations",
-        "$chiefPath\Skills",
+        "$chiefPath\.claude\skills",
         "$chiefPath\Notes"
     )
 
@@ -599,6 +599,11 @@ if (Step-Done 7) {
     }
 
     Write-Host "  Folder structure created" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Skills folder created at $chiefPath\.claude\skills\" -ForegroundColor White
+    Write-Host "  Skills are instructions Claude discovers automatically." -ForegroundColor White
+    Write-Host "  Add a SKILL.md file to teach Claude a new capability." -ForegroundColor White
+    Write-Host "  Claude matches your requests to skill descriptions and activates them on its own." -ForegroundColor White
     Mark-Done 7
 }
 Write-Host ""
