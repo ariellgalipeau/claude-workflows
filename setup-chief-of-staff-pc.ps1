@@ -416,11 +416,33 @@ if (Step-Done 6) {
 } else {
     # Verify npx is available — Gmail MCP requires Node.js
     if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
-        Write-Host "  ERROR: npx not found on your PATH." -ForegroundColor Red
-        Write-Host "  The Gmail MCP requires Node.js. Install it from:" -ForegroundColor Yellow
-        Write-Host "    https://nodejs.org/  (LTS version, click the Windows installer)" -ForegroundColor Yellow
-        Write-Host "  After installing, close PowerShell, reopen it, and re-run this script." -ForegroundColor Yellow
-        Step-Failed 6
+        Write-Host "  npx not found. The Gmail MCP requires Node.js." -ForegroundColor Yellow
+        # Try auto-installing via winget if available
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-Host "  winget detected — installing Node.js automatically..." -ForegroundColor White
+            try {
+                winget install OpenJS.NodeJS --accept-source-agreements --accept-package-agreements
+                # Refresh PATH in current session so npx is available immediately
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+                if (Get-Command npx -ErrorAction SilentlyContinue) {
+                    Write-Host "  Node.js installed via winget" -ForegroundColor Green
+                } else {
+                    Write-Host "  Node.js installed but npx not yet on PATH." -ForegroundColor Yellow
+                    Write-Host "  Close PowerShell, reopen it, and re-run this script." -ForegroundColor Yellow
+                    Step-Failed 6
+                }
+            } catch {
+                Write-Host "  ERROR: Failed to install Node.js via winget." -ForegroundColor Red
+                Write-Host "  Install it manually from https://nodejs.org/en/download" -ForegroundColor Yellow
+                Write-Host "  After installing, close PowerShell, reopen it, and re-run this script." -ForegroundColor Yellow
+                Step-Failed 6
+            }
+        } else {
+            Write-Host "  ERROR: npx not found and winget is not available." -ForegroundColor Red
+            Write-Host "  Install Node.js from https://nodejs.org/en/download" -ForegroundColor Yellow
+            Write-Host "  After installing, close PowerShell, reopen it, and re-run this script." -ForegroundColor Yellow
+            Step-Failed 6
+        }
     }
 
     if (-not (Test-Path $gmailMcpDir)) {
@@ -699,6 +721,10 @@ Write-Host '    "Show me my latest unread emails"'
 Write-Host '    "Draft an email to myself saying hello"'
 Write-Host ""
 Write-Host "  If something isn't working, raise your hand — we're here to help!"
+Write-Host ""
+Write-Host "  NOTE: If 'claude' is not recognized in a new PowerShell window," -ForegroundColor Yellow
+Write-Host "  close PowerShell completely and reopen it. The PATH update" -ForegroundColor Yellow
+Write-Host "  takes effect in new windows only." -ForegroundColor Yellow
 Write-Host ""
 
 # Clean up checkpoints only on a fully successful run.
