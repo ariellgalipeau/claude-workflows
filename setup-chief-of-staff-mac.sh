@@ -88,7 +88,7 @@ fi
 # =========================================================================
 # Step 1: Claude Code
 # =========================================================================
-echo "[1/8] Checking Claude Code..."
+echo "[1/9] Checking Claude Code..."
 if step_done 1 && command -v claude &> /dev/null; then
     echo "  ✓ Claude Code is installed (skipped)"
 elif command -v claude &> /dev/null; then
@@ -116,7 +116,7 @@ echo ""
 # =========================================================================
 # Step 2: Install Homebrew (or skip if not admin)
 # =========================================================================
-echo "[2/8] Checking Homebrew..."
+echo "[2/9] Checking Homebrew..."
 if step_done 2; then
     echo "  ✓ Homebrew step already completed (skipped)"
 elif command -v brew &> /dev/null; then
@@ -158,7 +158,7 @@ echo ""
 # =========================================================================
 # Step 3: Install google-mcp-server
 # =========================================================================
-echo "[3/8] Installing Google MCP server..."
+echo "[3/9] Installing Google MCP server..."
 
 # Determine install method and path
 GOOGLE_MCP_PATH=""
@@ -210,7 +210,7 @@ echo ""
 # =========================================================================
 # Step 4: Save credentials
 # =========================================================================
-echo "[4/8] Saving your Google credentials..."
+echo "[4/9] Saving your Google credentials..."
 
 # Write credentials to BOTH shell profiles (zsh AND bash) so they load regardless of shell
 for RC_FILE in ~/.zshrc ~/.bash_profile; do
@@ -249,7 +249,7 @@ echo ""
 # =========================================================================
 # Step 5: Authenticate Google (Calendar, Drive, Gmail, Slides)
 # =========================================================================
-echo "[5/8] Authenticating with Google (Calendar, Drive, Slides)..."
+echo "[5/9] Authenticating with Google (Calendar, Drive, Slides)..."
 if step_done 5; then
     echo "  ✓ Google auth already completed (skipped)"
     read -p "  Re-run authentication anyway? (y/n): " REAUTH
@@ -292,7 +292,7 @@ echo ""
 # =========================================================================
 # Step 6: Add MCP servers to Claude Code
 # =========================================================================
-echo "[6/8] Adding Google connection to Claude Code..."
+echo "[6/9] Adding Google connection to Claude Code..."
 if step_done 6; then
     echo "  ✓ MCP connections already added (skipped)"
 else
@@ -326,7 +326,7 @@ echo ""
 # The ngs google-mcp-server in Step 6 is READ-ONLY for Gmail (list + get).
 # To send email from Claude Code, we need @gongrzhe/server-gmail-autoauth-mcp.
 # It uses the same OAuth client (your client_secret_*.json) but a separate token.
-echo "[7/8] Setting up Gmail send capability..."
+echo "[7/9] Setting up Gmail send capability..."
 if step_done 7; then
     echo "  ✓ Gmail MCP already set up (skipped)"
 else
@@ -482,7 +482,7 @@ echo ""
 # =========================================================================
 # Step 8: Folder structure
 # =========================================================================
-echo "[8/8] Creating your Chief of Staff folder structure..."
+echo "[8/9] Creating your Chief of Staff folder structure..."
 if step_done 8; then
     echo "  ✓ Folder structure already created (skipped)"
 else
@@ -581,6 +581,37 @@ fi
 echo ""
 
 # =========================================================================
+# Step 9: Create "chief" shortcut command
+# =========================================================================
+echo "[9/9] Creating 'chief' shortcut command..."
+
+CHIEF_FUNCTION='
+# --- Launch by Lunch: Chief of Staff shortcut ---
+chief() {
+    cd ~/chief && claude
+}'
+
+# Add to both .zshrc and .bash_profile for shell diversity
+for RCFILE in "$HOME/.zshrc" "$HOME/.bash_profile"; do
+    if [ -f "$RCFILE" ]; then
+        if grep -q "function chief\|chief()" "$RCFILE" 2>/dev/null; then
+            echo "  'chief' shortcut already exists in $(basename $RCFILE) (skipped)"
+        else
+            echo "$CHIEF_FUNCTION" >> "$RCFILE"
+            echo "  'chief' shortcut added to $(basename $RCFILE)"
+        fi
+    else
+        echo "$CHIEF_FUNCTION" > "$RCFILE"
+        echo "  Created $(basename $RCFILE) with 'chief' shortcut"
+    fi
+done
+
+# Load it in the current session
+eval "$CHIEF_FUNCTION"
+echo "  Type 'chief' in any terminal window to launch your Chief of Staff"
+echo ""
+
+# =========================================================================
 # Done!
 # =========================================================================
 echo "=========================================="
@@ -591,9 +622,10 @@ echo "  Your connections:"
 export PATH="$HOME/.local/bin:$PATH"
 claude mcp list 2>/dev/null || echo "  (restart your terminal to see connections)"
 echo ""
-echo "  To start your Chief of Staff:"
-echo "    cd ~/chief"
-echo "    claude"
+echo "  To start your Chief of Staff, just type:"
+echo "    chief"
+echo ""
+echo "  (Or manually: cd ~/chief then claude)"
 echo ""
 echo "  Try asking:"
 echo '    "What'\''s on my calendar this week?"'

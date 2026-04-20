@@ -184,7 +184,7 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 # =========================================================================
 # Step 1: Check Claude Code
 # =========================================================================
-Write-Host "[1/7] Checking Claude Code..." -ForegroundColor Yellow
+Write-Host "[1/8] Checking Claude Code..." -ForegroundColor Yellow
 
 $claudeExe = Find-ClaudeExe
 if ($claudeExe) {
@@ -221,7 +221,7 @@ Write-Host ""
 # =========================================================================
 # Step 2: Download google-mcp-server
 # =========================================================================
-Write-Host "[2/7] Setting up Google MCP server..." -ForegroundColor Yellow
+Write-Host "[2/8] Setting up Google MCP server..." -ForegroundColor Yellow
 
 # Determine install location — matches the PC setup guide ($env:USERPROFILE\Tools)
 $toolsDir = Join-Path $env:USERPROFILE "Tools"
@@ -291,7 +291,7 @@ Write-Host ""
 # =========================================================================
 # Step 3: Save credentials to environment
 # =========================================================================
-Write-Host "[3/7] Saving your Google credentials..." -ForegroundColor Yellow
+Write-Host "[3/8] Saving your Google credentials..." -ForegroundColor Yellow
 if (Step-Done 3) {
     Write-Host "  Credentials already saved (skipped)" -ForegroundColor Green
 } else {
@@ -311,7 +311,7 @@ Write-Host ""
 # =========================================================================
 # Step 4: Authenticate Google (Calendar, Drive, Gmail, Slides)
 # =========================================================================
-Write-Host "[4/7] Authenticating with Google (Calendar, Drive, Slides)..." -ForegroundColor Yellow
+Write-Host "[4/8] Authenticating with Google (Calendar, Drive, Slides)..." -ForegroundColor Yellow
 if (Step-Done 4) {
     Write-Host "  Google auth already completed (skipped)" -ForegroundColor Green
     $reauth = Read-Host "  Re-run authentication anyway? (y/n)"
@@ -351,7 +351,7 @@ Write-Host ""
 # =========================================================================
 # Step 5: Add MCP server to Claude Code
 # =========================================================================
-Write-Host "[5/7] Adding Google connection to Claude Code..." -ForegroundColor Yellow
+Write-Host "[5/8] Adding Google connection to Claude Code..." -ForegroundColor Yellow
 if (Step-Done 5) {
     Write-Host "  MCP connections already added (skipped)" -ForegroundColor Green
 } else {
@@ -385,7 +385,7 @@ Write-Host ""
 # The ngs google-mcp-server in Step 5 is READ-ONLY for Gmail (list + get).
 # To send email from Claude Code, we need @gongrzhe/server-gmail-autoauth-mcp.
 # It uses the same OAuth client (your client_secret_*.json) but a separate token.
-Write-Host "[6/7] Setting up Gmail send capability..." -ForegroundColor Yellow
+Write-Host "[6/8] Setting up Gmail send capability..." -ForegroundColor Yellow
 $gmailMcpDir = Join-Path $env:USERPROFILE ".gmail-mcp"
 $gmailKeysFile = Join-Path $gmailMcpDir "gcp-oauth.keys.json"
 $gmailCredsFile = Join-Path $gmailMcpDir "credentials.json"
@@ -561,7 +561,7 @@ Write-Host ""
 # =========================================================================
 # Step 7: Create folder structure
 # =========================================================================
-Write-Host "[7/7] Creating your Chief of Staff folder structure..." -ForegroundColor Yellow
+Write-Host "[7/8] Creating your Chief of Staff folder structure..." -ForegroundColor Yellow
 if (Step-Done 7) {
     Write-Host "  Folder structure already created (skipped)" -ForegroundColor Green
 } else {
@@ -686,6 +686,48 @@ if (-not $sanityPassed) {
 Write-Host ""
 
 # =========================================================================
+# Step 8: Create "chief" shortcut command
+# =========================================================================
+Write-Host "[8/8] Creating 'chief' shortcut command..." -ForegroundColor Yellow
+
+$profileDir = Split-Path $PROFILE -Parent
+if (-not (Test-Path $profileDir)) {
+    New-Item -Path $profileDir -ItemType Directory -Force | Out-Null
+}
+
+$chiefFunction = @'
+
+# --- Launch by Lunch: Chief of Staff shortcut ---
+function chief {
+    $chiefPath = Join-Path $env:USERPROFILE "chief"
+    if (-not (Test-Path $chiefPath)) {
+        Write-Host "Chief folder not found at $chiefPath" -ForegroundColor Red
+        return
+    }
+    Set-Location $chiefPath
+    claude
+}
+'@
+
+if (Test-Path $PROFILE) {
+    $profileContent = Get-Content $PROFILE -Raw
+    if ($profileContent -match "function chief") {
+        Write-Host "  'chief' shortcut already exists in PowerShell profile (skipped)" -ForegroundColor Green
+    } else {
+        Add-Content -Path $PROFILE -Value $chiefFunction
+        Write-Host "  'chief' shortcut added to PowerShell profile" -ForegroundColor Green
+    }
+} else {
+    Set-Content -Path $PROFILE -Value $chiefFunction
+    Write-Host "  PowerShell profile created with 'chief' shortcut" -ForegroundColor Green
+}
+
+# Load it in the current session too
+Invoke-Expression $chiefFunction
+Write-Host "  Type 'chief' in any PowerShell window to launch your Chief of Staff" -ForegroundColor White
+Write-Host ""
+
+# =========================================================================
 # Done!
 # =========================================================================
 Write-Host "==========================================" -ForegroundColor Cyan
@@ -695,9 +737,10 @@ Write-Host ""
 Write-Host "  Your connections:"
 try { claude mcp list } catch { Write-Host "  (restart PowerShell to see connections)" }
 Write-Host ""
-Write-Host "  To start your Chief of Staff:"
-Write-Host "    cd ~\chief"
-Write-Host "    claude"
+Write-Host "  To start your Chief of Staff, just type:"
+Write-Host "    chief" -ForegroundColor White
+Write-Host ""
+Write-Host "  (Or manually: cd ~\chief then claude)"
 Write-Host ""
 Write-Host "  Try asking:"
 Write-Host '    "What''s on my calendar this week?"'
